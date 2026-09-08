@@ -1,0 +1,64 @@
+# Copy this file to master_resume.yaml and fill in your own career
+# history. master_resume.yaml is gitignored — this template is not.
+#
+# This is your CANONICAL, FACTUAL resume — the only source the resume
+# tailoring agent (Phase 6) is allowed to draw from. Never let the
+# system invent anything that isn't here.
+
+professional_summary: >
+  Data Scientist with experience building and deploying machine
+  learning systems, with a focus on applied AI and LLM-based tooling.
+
+skills:
+  - "Python"
+  - "SQL"
+  - "PyTorch"
+  - "scikit-learn"
+  - "FastAPI"
+
+work_experience:
+  - company: "Example Insurance Co."
+    title: "Data Science Intern"
+    location: "Pune, India"
+    start_date: "2025-06-01"
+    end_date: null   # null/omitted means "current role"
+    bullets:
+      - "Built a claim-line-item classification pipeline reducing manual review time."
+      - "Collaborated with underwriting to define feature requirements."
+    technologies:
+      - "Python"
+      - "scikit-learn"
+      - "SQL"
+
+  - company: "Example University"
+    title: "Junior Research Fellow"
+    location: "Pune, India"
+    start_date: "2023-01-01"
+    end_date: "2025-05-31"
+    bullets:
+      - "Conducted DFT-based computational materials science research."
+    technologies:
+      - "Python"
+      - "VASP"
+
+education:
+  - institution: "Example University"
+    degree: "M.Sc."
+    field_of_study: "Physics"
+    start_date: "2021-07-01"
+    end_date: "2023-06-30"
+    grade: null
+
+certifications: []
+
+projects:
+  - name: "Example Portfolio Project"
+    description: "A short description of what it does and why it matters."
+    bullets:
+      - "Key outcome or metric, phrased as an achievement."
+    technologies:
+      - "Python"
+    url: null
+
+achievements:
+  - "Example achievement, e.g. a publication, award, or notable result."

@@ -1,0 +1,30 @@
+full_name: "Test Candidate"
+email: "test.candidate@example.com"
+phone: "+91-9000000000"
+
+skills:
+  - "Python"
+  - "python"   # deliberately duplicate-ish to test dedupe (case-sensitive, stays distinct)
+  - "  SQL  "  # deliberately padded to test stripping
+
+years_experience: 3.5
+
+preferred_roles:
+  - "Data Scientist"
+
+preferred_locations:
+  - "Pune"
+
+work_mode: "hybrid"
+
+expected_salary_min_lpa: 8
+expected_salary_max_lpa: 14
+
+notice_period_days: 30
+
+industries_of_interest:
+  - "Insurance"
+industries_to_avoid: []
+keywords:
+  - "LLM"
+keywords_to_avoid: []

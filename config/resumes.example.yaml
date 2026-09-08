@@ -1,0 +1,27 @@
+# Copy this file to resumes.yaml and list your own, ALREADY-CREATED
+# resume files. resumes.yaml is gitignored — this template is not.
+#
+# This system never generates, edits, or rewords resume content. It
+# only selects which of these existing files best fits a given job.
+# Paths are relative to the project root. Allowed file types: .pdf, .docx
+
+resumes:
+  - id: data_analyst
+    file: resumes/data_analyst.pdf
+    roles:
+      - "Data Analyst"
+      - "Business Analyst"
+
+  - id: data_scientist
+    file: resumes/data_scientist.pdf
+    roles:
+      - "Data Scientist"
+      - "Applied Data Scientist"
+
+  - id: ai_ml_engineer
+    file: resumes/ai_ml_engineer.pdf
+    roles:
+      - "Machine Learning Engineer"
+      - "AI Engineer"
+      - "ML Engineer"
+      - "Computer Vision Engineer"

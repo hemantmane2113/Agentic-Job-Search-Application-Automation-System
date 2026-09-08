@@ -1,0 +1,49 @@
+# Copy this file to candidate_profile.yaml and fill in your own
+# details. candidate_profile.yaml is gitignored — this template is not.
+#
+# This file defines your JOB-SEARCH CRITERIA: what you're looking
+# for, used by the matching engine to score jobs. It is NOT your
+# resume — see master_resume.example.yaml for your career history.
+
+full_name: "Jane Doe"
+email: "jane.doe@example.com"
+phone: "+91-9999999999"
+
+skills:
+  - "Python"
+  - "SQL"
+  - "Machine Learning"
+  - "Deep Learning"
+
+years_experience: 3
+
+preferred_roles:
+  - "Data Scientist"
+  - "Machine Learning Engineer"
+  - "AI Engineer"
+
+preferred_locations:
+  - "Pune"
+  - "Bangalore"
+  - "Remote"
+
+work_mode: "any"   # remote | hybrid | onsite | any
+
+expected_salary_min_lpa: 8
+expected_salary_max_lpa: 14
+
+notice_period_days: 30
+
+industries_of_interest:
+  - "Insurance"
+  - "Fintech"
+
+industries_to_avoid: []
+
+keywords:
+  - "LLM"
+  - "RAG"
+
+keywords_to_avoid:
+  - "Cold calling"
+  - "Field sales"

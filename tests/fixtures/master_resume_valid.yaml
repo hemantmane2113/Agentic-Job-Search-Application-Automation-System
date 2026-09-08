@@ -1,0 +1,34 @@
+professional_summary: "Test summary."
+
+skills:
+  - "Python"
+  - "SQL"
+
+work_experience:
+  - company: "Company A"
+    title: "Data Science Intern"
+    start_date: "2024-01-01"
+    end_date: "2025-01-01"   # exactly 1 year
+    bullets:
+      - "Did a thing."
+    technologies:
+      - "Python"
+
+  - company: "Company B"
+    title: "Research Assistant"
+    start_date: "2022-01-01"
+    end_date: "2024-01-01"   # exactly 2 years
+    bullets:
+      - "Did another thing."
+    technologies:
+      - "Python"
+
+education:
+  - institution: "Test University"
+    degree: "M.Sc."
+    field_of_study: "Physics"
+
+certifications: []
+projects: []
+achievements:
+  - "Test achievement."

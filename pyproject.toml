@@ -1,0 +1,50 @@
+[project]
+name = "naukri-agent"
+version = "0.1.0"
+description = "Agentic job-search and application-assistance system for Naukri.com"
+requires-python = ">=3.12"
+readme = "README.md"
+
+dependencies = [
+    # -- Phase 1 --
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "click>=8.1",
+    # -- Phase 2 --
+    "email-validator>=2.1",   # backs pydantic's EmailStr
+    # -- Phase 5 --
+    "ollama>=0.3",
+    "groq>=0.9",
+    "openai>=1.30",
+    # -- Phase 7 --
+    "playwright>=1.45",
+    # -- Added in later phases (kept here as the project grows) --
+    # "apscheduler>=3.10"       # Phase 11 - scheduling
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+]
+
+[project.scripts]
+naukri-agent = "naukri_agent.cli.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "manual: requires a real Naukri account, network access, and installed Playwright browser binaries; skipped by default. Run explicitly with `pytest -m manual`.",
+]
+addopts = "-m 'not manual'"
