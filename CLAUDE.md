@@ -15,6 +15,16 @@ every write action. Built from a detailed master-prompt spec,
 developed in strict incremental phases with explicit approval required
 between phases.
 
+## Documentation map
+
+- `README.md` — setup/run instructions and the phase-status table.
+- [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md) — a deep-dive
+  study guide: architecture, design principles, and a module-by-module
+  code walkthrough with real excerpts. Read it before README if you're
+  trying to understand *why* the codebase looks the way it does rather
+  than how to run it.
+- This file — live handoff notes; read it first in every new session.
+
 ## Ground rules that must never be violated
 
 - **Never bypass CAPTCHA, MFA, rate limits, or anti-bot protections.**
@@ -35,9 +45,15 @@ between phases.
 - **`browser/selectors.py` is the ONLY file allowed to contain a raw
   CSS/XPath selector.** Every other module in `browser/` refers to a
   selector by name from there. Most selectors are still `UNVERIFIED`
-  placeholders — see that file's docstring for which six are
+  placeholders — see that file's docstring for which seven are
   `VERIFIED` (confirmed against a real Stage 1 inspection run) and
-  which still need verification via `naukri-agent inspect`.
+  which still need verification via `naukri-agent inspect`. (The
+  file's own docstring currently says "six" — that's an off-by-one in
+  the docstring itself worth fixing next time `selectors.py` is
+  touched; the actual count of `VERIFIED`-tagged constants is seven:
+  `RESUME_FILENAME`, `RESUME_LAST_UPDATED`, `RESUME_UPLOAD_BUTTON`,
+  `RESUME_REMOVE_BUTTON`, `JOB_CARD`, `JOB_CARD_COMPANY`, and
+  `AUTHENTICATED_NAV_INDICATOR`.)
 - **Skill normalization is a small, explicit alias table only**
   (`matching/skill_normalizer.py`) — never capability inference (e.g.
   "Python" must never imply "Django").
@@ -118,6 +134,14 @@ Three tiers, kept strictly separate — see `tests/manual/README.md`:
 
 Run `pytest` for the full non-manual suite before considering any
 change done. As of this handoff: 245 passed, 3 deselected.
+
+## Recent repo activity
+
+- `docs/PROJECT_OVERVIEW.md` was added and merged to `main` via PR #1
+  — a learner-facing deep dive, kept separate from this handoff file
+  and from README's setup instructions. Keep all three in sync when
+  architecture changes; this file is the one to update with *new*
+  handoff context, not the one to duplicate the other two into.
 
 ## Working style expected on this project
 
