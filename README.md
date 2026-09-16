@@ -1,14 +1,24 @@
 # naukri-agent
 
-An agentic job-search and application-assistance system for Naukri.com.
-Discovers jobs, scores them against your profile with a transparent
-deterministic algorithm, drafts tailored resumes, and prepares
-applications for your review — it never submits anything without your
-explicit approval (Section 22), and never attempts to bypass CAPTCHA,
-MFA, or anti-bot protections (Section 20).
+An agentic job-search assistant for Naukri.com. Discovers jobs, scores
+them against your profile with a transparent deterministic algorithm,
+selects the best-fitting resume from your own files, and emails you a
+ranked daily digest of the strongest matches with their Naukri links
+and concise reasons. It never submits an application, and never
+attempts to bypass CAPTCHA, MFA, or anti-bot protections (Section 20).
 
-> **Status:** Phase 1 of 12 (project scaffolding). Most CLI commands
-> are stubs — see "Development phases" below.
+> **Objective change (2026-09-09):** automatic application submission
+> was dropped. The goal is now a **daily match digest** — discover,
+> understand, rank, and email the best jobs; you apply on Naukri
+> yourself and record it with `naukri-agent mark-applied`. This is
+> built as **Stage A** (implemented). The Apply-workflow
+> reverse-engineering (Stage 1.5) is frozen in the tree, untouched.
+
+> **Status:** Stage A (daily match digest) implemented — read-only
+> discovery, deterministic ranking, application/cooldown-aware
+> filtering, manual application history, file/console digest (no SMTP
+> yet), 3-sheet Excel mirror. Not yet run live against Naukri; no real
+> email configured.
 
 ## Architecture
 
@@ -156,18 +166,27 @@ Both `resumes.yaml` and the `resumes/` directory are gitignored.
 ## Running locally
 
 ```bash
-naukri-agent doctor      # verify environment is set up correctly
+naukri-agent doctor        # verify environment is set up correctly
+naukri-agent run-daily     # discover -> understand -> rank -> digest (+ Excel); no email in Stage A
+naukri-agent discover --query "Data Scientist @ Pune"   # read-only discovery only
+naukri-agent recommend --dry-run                        # full pipeline, digest to file
+naukri-agent export-excel --path ./out/history.xlsx     # regenerate the workbook from the DB
+naukri-agent mark-applied <job-id|external-id|url> --status APPLIED --note "applied on portal"
+naukri-agent mark-status <job> INTERVIEW
+naukri-agent applications --status APPLIED              # the authoritative application history
+naukri-agent report                                    # re-print the latest digest
 ```
 
-Other commands (`run-now`, `discover`, `match`, `prepare`, `apply`,
-`report`, `scheduler`) are registered but not yet implemented — each
-raises `NotImplementedError` naming the phase that implements it.
+`prepare` / `apply` raise `NotImplementedError` — application
+submission is out of scope. `scheduler` raises `NotImplementedError`
+(Stage B).
 
 ## Dry-run mode
 
-`DRY_RUN=true` in `.env` (the default) means the pipeline will
-discover/parse/score/prepare but never submit an application. This
-stays the default throughout development.
+`DRY_RUN=true` in `.env` (the default) means the daily pipeline
+discovers / parses / scores / ranks and writes the digest to a file,
+but never sends email. Stage A has no code path that sends real email
+or submits an application.
 
 ## Human approval mode
 
@@ -176,13 +195,140 @@ requires your explicit approval before submission. This is not
 changed until the system has been thoroughly tested, and even then
 only under strict, explicitly-defined safety criteria.
 
+## Daily match digest (Stage A)
+
+`run-daily` runs the whole business logic once (no scheduling):
+discover jobs (read-only), understand each JD, score deterministically
+against your `CandidateProfile` + `MasterResume`, rank, cap at
+`DAILY_RECOMMENDATION_LIMIT` (default 10), render the digest to a file,
+and regenerate `job_search_history.xlsx` from the database.
+
+- **The database is the source of truth.** Excel is a read-only mirror,
+  fully regenerated on every export.
+- **Application status is only ever what you recorded** via
+  `mark-applied` / `mark-status` — never inferred, never asked of the
+  LLM. The Naukri link in the digest always comes from the stored `Job`.
+- A job you have applied to (or any status in
+  `RECOMMENDATION_EXCLUDE_IF_STATUS`) is never recommended again. A job
+  previously recommended but not applied follows
+  `RECOMMENDATION_COOLDOWN_DAYS`: `0` = eligible again next run; `>0` =
+  wait that many days.
+- The LLM only interprets job descriptions (extract-only) and, if
+  `EXPLANATION_USE_LLM=true`, adds an optional narrative sentence. It
+  never sets a score, decision, status, or URL.
+
 ## Scheduler
 
-Not implemented until Phase 11.
+There is still no in-process scheduler (`naukri-agent scheduler` still
+raises `NotImplementedError`) — the OS scheduler is the scheduler, by
+design (smallest reliable option, one less thing to keep alive as a
+background Python process). This project has been validated (Run 23)
+running `naukri-agent run-daily` directly; the same command is what a
+scheduled task should invoke.
+
+### Windows Task Scheduler setup (daily 10:00 AM IST)
+
+Two hard requirements, both because `naukri-agent`'s config/paths
+(`.env`, `./data`, `./logs`, `./out`, `./config`) are resolved relative
+to the process's **working directory**, not its own file location:
+
+1. **"Start in" must be the project root** — exactly the folder
+   containing `.env`, `pyproject.toml`, `data/`, `config/`. If this is
+   wrong, `.env` silently isn't found and every setting (Naukri
+   credentials included) falls back to an empty/default value.
+2. **The action must run `.venv\Scripts\naukri-agent.exe run-daily`**
+   (the installed console-script entry point) — not a bare `python`
+   invocation of some other module — because that entry point is the
+   only one that calls `setup_logging()` before anything else runs
+   (see `cli/main.py:main`), which is what makes a scheduled run's
+   logs land in `logs/naukri_agent.log` instead of nowhere.
+
+**Create the task** (PowerShell, run once, interactively, to register
+it — this does not execute the task, just creates it):
+
+```powershell
+$action = New-ScheduledTaskAction `
+  -Execute "C:\Users\sneha\Desktop\hemant\claude\projects\naukri_agent_project\naukri_agent\.venv\Scripts\naukri-agent.exe" `
+  -Argument "run-daily" `
+  -WorkingDirectory "C:\Users\sneha\Desktop\hemant\claude\projects\naukri_agent_project\naukri_agent"
+$trigger = New-ScheduledTaskTrigger -Daily -At 10:00AM
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd
+Register-ScheduledTask -TaskName "NaukriAgentDailyDigest" -Action $action -Trigger $trigger -Settings $settings -Description "naukri-agent run-daily, read-only discovery + digest, no Apply"
+```
+
+`-Daily -At 10:00AM` uses the machine's local timezone — set Windows'
+own timezone to India Standard Time (Settings, or already the case if
+you're in India) rather than trying to convert in the task itself;
+Task Scheduler has no separate per-task timezone concept.
+
+**Ollama must already be running at 10:00 AM.** On this machine Ollama
+runs as a normal per-user app (`ollama app.exe`, auto-started at
+login), **not** a Windows service — it is only alive while you are
+logged in. Two ways to make this reliable, in order of preference:
+- Leave the task at its default trigger settings (equivalent to "only
+  run when a user is logged on") and stay logged in / don't fully shut
+  down the machine overnight — the simplest option, and what was just
+  validated in Run 23.
+- If you need it to run even when logged out, you'd need Ollama
+  installed/configured as an actual Windows service first (not covered
+  here — out of scope for this change, since it touches a piece of
+  software outside this repo).
+
+Do **not** check "Run whether user is logged on or not" unless Ollama
+is guaranteed to be running independently of your session — otherwise
+JD extraction will fail with a connection error to `localhost:11434`
+every time.
+
+**What happens if Naukri needs a human** (CAPTCHA/MFA, or the
+persistent session simply expired): `login()` raises
+`NaukriCaptchaError`/`NaukriMfaError` immediately — it never blocks on
+input, so a scheduled run can never hang waiting for someone to solve
+a challenge. `orchestration/pipeline.py` catches any such exception
+around discovery and marks the `DailyRun` `FAILED` with the exception
+type recorded, so a failed scheduled run is always visible (check
+`naukri-agent doctor`'s "Digest tables reachable" count, `logs/
+naukri_agent.log`, or query `RunEvent`) — Task Scheduler's own History
+tab will also show the process's exit code.
+
+**Verify without waiting for 10:00 AM:** right-click the task in Task
+Scheduler → Run. This executes the real command immediately, so only
+do this once you're ready for a real run (same considerations as
+running `naukri-agent run-daily` by hand).
 
 ## Email setup
 
-Not implemented until Phase 10.
+Digest delivery has three modes, selected by `EMAIL_SENDER`:
+
+- **`file`** (default) — writes the digest under `EMAIL_OUTPUT_DIR`
+  (`./out/emails/digest_<timestamp>.txt`). Nothing is sent anywhere.
+  This is what every run so far, including Run 23, has used.
+- **`console`** — prints the digest to stdout.
+- **`smtp`** — sends a real email via `SmtpEmailSender`
+  (`notifications/email.py`), stdlib `smtplib` + STARTTLS. Requires
+  `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `NOTIFY_EMAIL_TO`
+  to ALL be set in `.env` — if any are missing, the run fails clearly
+  (`EmailConfigError`, itself a subclass of the existing
+  `EmailSendError`) instead of silently falling back to a file, so a
+  broken schedule shows up as a failed run, not a quiet no-op.
+
+**For Gmail specifically:** `SMTP_HOST=smtp.gmail.com`,
+`SMTP_PORT=587`, `SMTP_USERNAME=<your gmail address>`, and
+`SMTP_PASSWORD=<a Gmail App Password>` — not your normal account
+password. Generate one at
+[myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+(requires 2-Step Verification enabled first). Any other standard
+STARTTLS SMTP provider works the same way; nothing here is
+Gmail-specific beyond that example.
+
+Credentials are read only from `.env` (via `Settings`) — never
+hard-coded, never logged. Every `SmtpEmailSender` failure is reported
+by exception type only (`type(exc).__name__`), matching
+`FileEmailSender`'s existing convention, since some SMTP server error
+responses can echo back parts of the failed request.
+
+**`EMAIL_SENDER` is still `file` by default** — switching to `smtp` is
+a deliberate, separate step you take when ready; it was not flipped as
+part of adding this capability.
 
 ## Testing
 
@@ -199,6 +345,11 @@ credentials:
   real Naukri account and installed browser binaries; marked
   `@pytest.mark.manual` and excluded by default. Run with
   `pytest -m manual` — see `tests/manual/README.md`.
+
+Stage A adds 37 tests (recommendation ranking + cooldown semantics,
+application history, digest/Excel output, read-only job-detail fetch,
+end-to-end pipeline, new-table migration, CLI). Full non-manual suite:
+390 passed, 3 deselected.
 
 ## Troubleshooting
 
@@ -230,9 +381,9 @@ actually exists on disk — reporting exactly which check failed.
 | 4 | Deterministic job matching engine | ✅ done |
 | 5 | LLM-based job description parser + provider abstraction | ✅ done |
 | 6 | Resume registry + selection (revised from resume-tailoring) | ✅ done |
-| 7 | Playwright Naukri integration | 🟡 Stage 1 (read-only inspection) done; Stage 2 pending |
-| 8 | Application preparation | pending |
-| 9 | Human approval interface | pending |
-| 10 | Email notifications | pending |
-| 11 | Daily scheduler | pending |
+| 7 | Playwright Naukri integration | 🟡 Stage 1 (read-only inspection) done; read-only job-detail fetch added for Stage A; Stage 1.5 Apply-workflow frozen |
+| 8 | Application preparation | ⛔ abandoned — application submission is out of scope |
+| 9 | Human approval interface | ⛔ abandoned |
+| A | Daily match digest (objective change) | ✅ done — discovery + JD fetch, deterministic ranking, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel, `RunEvent` audit |
+| B | Real SMTP email + scheduler | pending |
 | 12 | Testing, logging, error handling, docs polish | pending |
