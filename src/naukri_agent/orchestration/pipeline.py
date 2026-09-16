@@ -315,6 +315,18 @@ def run_daily_recommendations(
             run.status = DailyRunStatus.FAILED
             run.failure_reason = f"email delivery failed: {type(exc).__name__}"
 
+        # --- finalise (BEFORE Excel export: the "Daily Runs" sheet reads
+        # run.status/run.finished_at directly off this same in-memory row,
+        # so finalising after export_workbook() would make every
+        # successful run show as "STARTED" forever in the exported file,
+        # even though this function's own returned DailyRunResult.status
+        # is correct -- that field is set below, after this point either
+        # way. Excel export failing never changes run.status, so moving
+        # this earlier doesn't affect failure semantics.) ---
+        if run.status != DailyRunStatus.FAILED:
+            run.status = DailyRunStatus.COMPLETED
+        run.finished_at = datetime.datetime.now(datetime.UTC)
+
         # --- Excel export (regenerated from DB; never fails the run) ---
         excel_path = None
         if settings.excel_export_enabled:
@@ -329,11 +341,6 @@ def run_daily_recommendations(
                 add_run_event(session, daily_run_id=run_id, seq=seq, stage="excel_export",
                               status=RunEventStatus.FAILED, detail={"error": type(exc).__name__})
                 notes.append(f"Excel export failed: {type(exc).__name__}")
-
-        # --- finalise ---
-        if run.status != DailyRunStatus.FAILED:
-            run.status = DailyRunStatus.COMPLETED
-        run.finished_at = datetime.datetime.now(datetime.UTC)
 
         return DailyRunResult(
             run_id=run_id,

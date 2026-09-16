@@ -9,6 +9,8 @@ import datetime
 import inspect
 import shutil
 
+from openpyxl import load_workbook
+
 from naukri_agent.database.base import session_scope
 from naukri_agent.database.models import (
     ApplicationStatus,
@@ -137,6 +139,14 @@ def test_happy_path_completes_writes_digest_and_excel_without_email(tmp_path):
     assert result.email_status == "dry_run"
     # excel regenerated from DB
     assert result.excel_path and __import__("pathlib").Path(result.excel_path).exists()
+    # Regression: export_workbook() used to run BEFORE run.status was
+    # finalized to COMPLETED, so the "Daily Runs" sheet showed every
+    # successful run as "STARTED" forever, even though result.status
+    # (asserted above) was already correct.
+    runs_ws = load_workbook(result.excel_path)["Daily Runs"]
+    header = [c.value for c in runs_ws[1]]
+    status_col = header.index("Run Status")
+    assert runs_ws[2][status_col].value == "COMPLETED"
 
     with session_scope(factory) as s:
         run = s.query(DailyRun).one()
