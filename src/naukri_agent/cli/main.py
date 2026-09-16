@@ -496,7 +496,27 @@ def scheduler() -> None:
 
 
 def main() -> None:
-    settings = get_settings()
+    """
+    Console-script entry point. get_settings() is called here, before
+    setup_logging() and before any Click command runs, specifically so
+    a bad .env value (an invalid DAILY_RUN_TIME, an unknown
+    LLM_PROVIDER, etc.) never shows the user a raw Pydantic
+    ValidationError traceback — logging isn't even configured yet at
+    that point, so there'd be nowhere for a "nice" version of it to go
+    either way. `doctor` already does this per-check, more precisely;
+    this is the same idea for every other command's startup.
+    """
+    try:
+        settings = get_settings()
+    except Exception as exc:  # noqa: BLE001 - deliberately broad: any startup config failure lands here
+        click.echo(f"naukri-agent: configuration error — {exc}", err=True)
+        click.echo(
+            "Run `naukri-agent doctor` for a detailed per-check diagnosis, "
+            "or check your .env file.",
+            err=True,
+        )
+        sys.exit(1)
+
     setup_logging(settings)
     cli()
 

@@ -48,22 +48,29 @@ naukri_agent/
 └── cli/                                  # `naukri-agent <command>` entrypoint
 ```
 
-### Browser automation (Phase 7)
+### Browser automation (Phase 7 / Stage A / Stage 1.5)
 
 ```
 browser/
 ├── browser_manager.py   # owns the Playwright lifecycle exclusively
-├── selectors.py          # the ONLY file with raw CSS selectors — currently UNVERIFIED
+├── selectors.py          # the ONLY file with raw CSS selectors — several VERIFIED
+│                           against real captures, several still UNVERIFIED
+│                           placeholders; see the file's own docstring for which
 ├── login.py                # fills credentials, detects CAPTCHA/MFA, never solves them
-├── profile.py                # read-only resume-section inspection
-├── jobs.py                     # read-only search + apply-workflow inspection
+├── profile.py                # read-only resume-section inspection (Stage 1)
+├── jobs.py                     # search_jobs() + fetch_job_detail(), both read-only (Stage A)
 ├── naukri_client.py              # high-level facade — the only interface other code should use
-└── inspection.py                   # the Stage 1 tool: `naukri-agent inspect`
+├── inspection.py                   # the Stage 1 tool: `naukri-agent inspect`
+└── apply_inspection.py               # Stage 1.5, FROZEN: `naukri-agent inspect-apply` —
+                                         human-driven, read-only post-Apply UI inspection;
+                                         never wired into the daily pipeline
 ```
 
 Orchestration code should only ever call `NaukriClient`'s methods
-(`login()`, `get_profile_resume()`, `search_jobs()`, `get_job()`) —
-never a selector directly.
+(`login()`, `get_profile_resume()`, `search_jobs()`, `fetch_job_detail()`,
+`get_job()`, `extract_application_ui()`) — never a selector directly.
+`prepare_application()` still raises `NotImplementedError` — application
+submission is out of scope (see the "Objective change" note above).
 
 ### The LLM is used only where language understanding is genuinely useful
 
@@ -113,12 +120,14 @@ future browser automation (Phase 7+).
 
 ### Phase 7 Stage 1 — read-only inspection
 
-This system's Naukri selectors (`browser/selectors.py`) are
-**unverified placeholders** — this codebase has no live access to
-naukri.com to confirm them against. Before trusting any browser-based
-Naukri interaction, run the inspection tool yourself, locally, where
-you have real network access and can solve a CAPTCHA/MFA challenge if
-one appears:
+Some of `browser/selectors.py` has been confirmed against real
+Naukri captures (see the file's own docstring for exactly which
+constants are `VERIFIED` vs. still `UNVERIFIED` placeholders) — this
+codebase's live access to naukri.com is limited to whatever runs
+you do locally, so treat anything not marked `VERIFIED` as a guess.
+Before trusting any browser-based Naukri interaction, run the
+inspection tool yourself, locally, where you have real network access
+and can solve a CAPTCHA/MFA challenge if one appears:
 
 ```bash
 playwright install chromium   # one-time, downloads real browser binaries
@@ -371,7 +380,7 @@ Stage A added tests for recommendation ranking + cooldown semantics,
 application history, digest/Excel output, read-only job-detail fetch,
 end-to-end pipeline, and new-table migration; Stage B added tests for
 the scheduler's job configuration and its safe-failure wrapper. Full
-non-manual suite: 847 passed, 3 deselected.
+non-manual suite: 855 passed, 3 deselected.
 
 ## Troubleshooting
 
@@ -408,4 +417,4 @@ actually exists on disk — reporting exactly which check failed.
 | 9 | Human approval interface | ⛔ abandoned |
 | A | Daily match digest (objective change) | ✅ done — discovery + JD fetch, deterministic ranking, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel, `RunEvent` audit |
 | B | Real SMTP email + scheduler | ✅ done — `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`) and `naukri-agent scheduler` (in-process daily trigger); OS-level cron/Task Scheduler remains a supported alternative to the latter |
-| 12 | Testing, logging, error handling, docs polish | pending |
+| 12 | Testing, logging, error handling, docs polish | ✅ done — coverage audit (90% project-wide) closed the two real gaps it found: `setup_logging()` had zero dedicated tests (`tests/test_logging_config.py`, new), and a bad `.env` value showed a raw traceback instead of a clean error (`main()` now catches it, `tests/test_cli_startup.py`); `docs/PROJECT_OVERVIEW.md` rewritten for the current Stage A/B architecture instead of describing the pre-objective-change design |

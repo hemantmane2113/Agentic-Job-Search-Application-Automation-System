@@ -124,7 +124,7 @@ before changing a module's behavior.
 | 7 Stage 1.5 — controlled post-Apply inspection (`inspect-apply`) | ❄️ FROZEN by the objective change. Code stays in the tree untouched; not extended. |
 | 7 Stage 2 — write operations (resume refresh, apply prep) | ⛔ ABANDONED — application submission is out of scope. |
 | A — daily match digest (objective change) | ✅ IMPLEMENTED 2026-09-09. read-only discovery + JD fetch, deterministic ranking, application/cooldown-aware filtering, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel mirror, `RunEvent` audit. |
-| B — real SMTP + scheduler | ✅ IMPLEMENTED. `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`, fails loudly if misconfigured rather than silently falling back) and `naukri-agent scheduler` (`scheduler/daemon.py`, APScheduler `BlockingScheduler`, fires daily at `DAILY_RUN_TIME` in `TIMEZONE`, a bad day's exception is logged and swallowed rather than cancelling tomorrow's firing). OS-level cron/Task Scheduler calling `run-daily` directly remains a fully supported alternative to the in-process scheduler — see README's "Scheduler" section. 847 passed, 3 deselected. Not yet run live with `EMAIL_SENDER=smtp` or under the in-process scheduler against real Naukri. |
+| B — real SMTP + scheduler | ✅ IMPLEMENTED. `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`, fails loudly if misconfigured rather than silently falling back) and `naukri-agent scheduler` (`scheduler/daemon.py`, APScheduler `BlockingScheduler`, fires daily at `DAILY_RUN_TIME` in `TIMEZONE`, a bad day's exception is logged and swallowed rather than cancelling tomorrow's firing). OS-level cron/Task Scheduler calling `run-daily` directly remains a fully supported alternative to the in-process scheduler — see README's "Scheduler" section. 855 passed, 3 deselected. Not yet run live with `EMAIL_SENDER=smtp` or under the in-process scheduler against real Naukri. |
 
 ### Stage 1 history worth knowing
 
@@ -529,7 +529,7 @@ Three tiers, kept strictly separate — see `tests/manual/README.md`:
   with `pytest -m manual`.
 
 Run `pytest` for the full non-manual suite before considering any
-change done. As of this handoff: **847 passed, 3 deselected**
+change done. As of this handoff: **855 passed, 3 deselected**
 (includes further skill-evidence/semantic-matcher/apply-inspection
 coverage added after the count below was last written, plus Stage B's
 `tests/test_scheduler.py`: 6 tests covering `daily_run_time` validation,
