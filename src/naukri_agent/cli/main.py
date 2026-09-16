@@ -481,11 +481,18 @@ def report() -> None:
 
 @cli.command("scheduler")
 def scheduler() -> None:
-    """Stage B — an in-process scheduler is not built yet."""
-    raise NotImplementedError(
-        "In-process scheduling is Stage B. For now run `naukri-agent run-daily` "
-        "from OS cron / Task Scheduler at your chosen time."
-    )
+    """
+    Stage B: start the in-process daily scheduler and block forever,
+    firing `run-daily`'s pipeline once a day at Settings.daily_run_time
+    (default 10:00) in Settings.timezone. An alternative to an OS-level
+    cron entry / Task Scheduler task calling `naukri-agent run-daily`
+    directly — either is a valid way to run this daily; use whichever
+    fits how you deploy it. Ctrl+C stops it cleanly.
+    """
+    settings = get_settings()
+    from naukri_agent.scheduler.daemon import run_scheduler
+
+    run_scheduler(settings)
 
 
 def main() -> None:

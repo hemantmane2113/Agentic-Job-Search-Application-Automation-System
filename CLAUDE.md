@@ -43,9 +43,16 @@ with their Naukri links and concise reasons for the match."**
 - **`prepare_application()` on `NaukriClient` stays `NotImplementedError`.**
   Application submission is out of scope (objective change). The daily
   digest never clicks Apply, fills a form, or submits anything.
-- **The daily digest never sends real email in Stage A.** It is
-  rendered to a file under `email_output_dir` (or the console);
-  `email_sender="smtp"` deliberately falls back to file with a warning.
+- **Real email only ever goes out when `EMAIL_SENDER=smtp` is
+  explicitly set (Stage B).** The default remains `file` (rendered
+  under `email_output_dir`; `console` prints it instead). Unlike
+  Stage A's original placeholder behavior, `email_sender="smtp"` no
+  longer falls back to file — `SmtpEmailSender` (`notifications/
+  email.py`) sends a real message via `smtplib`/STARTTLS, and fails
+  loudly (`EmailConfigError`) rather than silently if any of
+  `SMTP_HOST`/`SMTP_USERNAME`/`SMTP_PASSWORD`/`NOTIFY_EMAIL_TO` is
+  missing. Credentials are read only from `Settings`, never logged;
+  failures report only the exception type, never its message.
 - **DB is the source of truth; Excel is a regenerated read-only
   mirror.** `ApplicationHistory` is the *only* authoritative record of
   whether the user applied — never inferred, never asked of the LLM.
@@ -86,13 +93,16 @@ database/     SQLAlchemy models + repositories (upsert-pattern throughout)
               JobRecommendation / RunEvent (new-tables-only, no Alembic)
 recommendations/  build_digest: rank deterministic JobMatch rows, apply
               application-aware + cooldown eligibility, cap, explain
-notifications/    render_digest + FileEmailSender/ConsoleEmailSender (no SMTP)
+notifications/    render_digest + FileEmailSender/ConsoleEmailSender (default)
+              + SmtpEmailSender (opt-in via EMAIL_SENDER=smtp, Stage B)
 reporting/    excel.py: export_workbook — 3-sheet workbook regenerated from DB
 orchestration/    discovery.py (read-only discover+store) + pipeline.py
               (run_daily_recommendations — the daily business logic, no scheduling)
+scheduler/    Stage B: daemon.py — naukri-agent scheduler, an in-process
+              alternative to OS cron/Task Scheduler calling run-daily directly
 cli/          `naukri-agent <command>` — see `doctor`, `run-daily`,
               `discover`, `recommend`, `export-excel`, `mark-applied`,
-              `mark-status`, `applications`, `report`
+              `mark-status`, `applications`, `report`, `scheduler`
 ```
 
 Full narrative design rationale for each phase is in `README.md`'s
@@ -113,8 +123,8 @@ before changing a module's behavior.
 | 7 Stage 1 — read-only Naukri inspection | ✅ approved, including a login-state bugfix (see below) |
 | 7 Stage 1.5 — controlled post-Apply inspection (`inspect-apply`) | ❄️ FROZEN by the objective change. Code stays in the tree untouched; not extended. |
 | 7 Stage 2 — write operations (resume refresh, apply prep) | ⛔ ABANDONED — application submission is out of scope. |
-| A — daily match digest (objective change) | ✅ IMPLEMENTED 2026-09-09. read-only discovery + JD fetch, deterministic ranking, application/cooldown-aware filtering, ApplicationHistory + manual `mark-applied`, file/console digest (no SMTP), 3-sheet Excel mirror, `RunEvent` audit. 390 passed, 3 deselected. Awaiting user review. NOT run live against Naukri; no real email configured. |
-| B — real SMTP + scheduler | ⛔ NOT started. |
+| A — daily match digest (objective change) | ✅ IMPLEMENTED 2026-09-09. read-only discovery + JD fetch, deterministic ranking, application/cooldown-aware filtering, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel mirror, `RunEvent` audit. |
+| B — real SMTP + scheduler | ✅ IMPLEMENTED. `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`, fails loudly if misconfigured rather than silently falling back) and `naukri-agent scheduler` (`scheduler/daemon.py`, APScheduler `BlockingScheduler`, fires daily at `DAILY_RUN_TIME` in `TIMEZONE`, a bad day's exception is logged and swallowed rather than cancelling tomorrow's firing). OS-level cron/Task Scheduler calling `run-daily` directly remains a fully supported alternative to the in-process scheduler — see README's "Scheduler" section. 847 passed, 3 deselected. Not yet run live with `EMAIL_SENDER=smtp` or under the in-process scheduler against real Naukri. |
 
 ### Stage 1 history worth knowing
 
@@ -454,7 +464,7 @@ canonical). Never writes secrets.
 --dry-run/--no-dry-run`, `export-excel --path`, `mark-applied <job>
 --resume --status --date --note`, `mark-status <job> <status>`,
 `applications --status`, `report`. `run-now` → `run-daily`.
-`scheduler` raises `NotImplementedError` (Stage B). `prepare` / `apply`
+`scheduler` is implemented in Stage B (see below). `prepare` / `apply`
 raise `NotImplementedError` ("application submission is out of scope").
 `doctor` gained daily-digest config + "Digest tables reachable" checks.
 
@@ -472,6 +482,40 @@ tables; `DailyRun.applications_submitted` left vestigial at 0.
 `email_sender`, `email_output_dir`, `email_subject_prefix`,
 `explanation_use_llm`, `excel_export_enabled`, `excel_path`.
 
+## Stage B — real SMTP + scheduler
+
+Two independent additions, neither changing Stage A's pipeline logic:
+
+1. **`SmtpEmailSender`** (`notifications/email.py`) — real delivery via
+   stdlib `smtplib` + STARTTLS, selected by setting `EMAIL_SENDER=smtp`.
+   `build_email_sender()` requires `SMTP_HOST`/`SMTP_USERNAME`/
+   `SMTP_PASSWORD`/`NOTIFY_EMAIL_TO` ALL present, else raises
+   `EmailConfigError` (a subclass of the existing `EmailSendError`) —
+   a misconfigured scheduled run fails visibly instead of quietly
+   writing a digest nobody is watching. `email_sender` still defaults
+   to `file`; nothing about existing behavior changes unless this is
+   explicitly opted into. Credentials come only from `Settings`, never
+   logged; every exception reports only `type(exc).__name__`, matching
+   `FileEmailSender`'s existing convention — some SMTP server error
+   responses can echo back parts of the failed request.
+2. **`naukri-agent scheduler`** (`scheduler/daemon.py`) — an in-process
+   alternative to an OS-level cron entry / Task Scheduler task calling
+   `run-daily` directly (both remain valid; see README's "Scheduler"
+   section for the tradeoff). `build_scheduler()` constructs (without
+   starting) an APScheduler `BlockingScheduler` with one daily
+   `CronTrigger` at `Settings.daily_run_time` ("HH:MM", validated,
+   default `10:00`) in `Settings.timezone`; `run_scheduler()` starts it
+   and blocks until interrupted. `_run_job_safely()` wraps each firing
+   so an exception is logged (type only) and swallowed rather than
+   escaping — APScheduler cancels a job's *future* firings by default
+   if one raises, which would silently turn "daily" into "once".
+   `daily_run_time` is a new validated `Settings` field ("HH:MM",
+   24-hour) — a bad value fails at config-load time, not at 10:00 AM.
+
+Neither addition touches `run_daily_recommendations`, `build_digest`,
+`score_job`, or anything upstream of "how the digest gets delivered /
+how often the pipeline runs" — Stage A's pipeline logic is unchanged.
+
 ## Testing conventions
 
 Three tiers, kept strictly separate — see `tests/manual/README.md`:
@@ -485,8 +529,14 @@ Three tiers, kept strictly separate — see `tests/manual/README.md`:
   with `pytest -m manual`.
 
 Run `pytest` for the full non-manual suite before considering any
-change done. As of this handoff: **390 passed, 3 deselected** (353 →
-390 after Stage A). Stage A test files (37 tests):
+change done. As of this handoff: **847 passed, 3 deselected**
+(includes further skill-evidence/semantic-matcher/apply-inspection
+coverage added after the count below was last written, plus Stage B's
+`tests/test_scheduler.py`: 6 tests covering `daily_run_time` validation,
+`build_scheduler`'s job/trigger configuration, and `_run_job_safely`'s
+exception-swallowing — never calling `BlockingScheduler.start()`, which
+blocks forever). Stage A test files (37 tests, at the time they were
+added):
 `tests/test_recommendation_builder.py` (10 — ranking/cap/cooldown
 semantics/repost/LLM-narrative-drop), `tests/test_application_history.py`
 (7 — NOT_APPLIED default, idempotent mark-applied + events, canonical

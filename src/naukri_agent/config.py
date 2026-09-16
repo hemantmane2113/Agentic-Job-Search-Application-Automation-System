@@ -196,13 +196,33 @@ class Settings(BaseSettings):
     # ResumeSelection.resume_id.
     mark_applied_default_resume_from_selection: bool = True
 
-    # --- Digest email delivery (Stage A: file / console only) ---
-    # "file"    -> write the rendered digest under email_output_dir
+    # --- Digest email delivery ---
+    # "file"    -> write the rendered digest under email_output_dir (default)
     # "console" -> print it to stdout
-    # "smtp"    -> NOT implemented in Stage A; falls back to "file"
+    # "smtp"    -> send real email via SmtpEmailSender (notifications/email.py);
+    #              requires smtp_host/smtp_username/smtp_password/notify_email_to
+    #              all set, or the run fails loudly (EmailConfigError) rather
+    #              than silently falling back to "file"
     email_sender: str = "file"
     email_output_dir: Path = Path("./out/emails")
     email_subject_prefix: str = "[naukri-agent]"
+
+    # --- Stage B: in-process daily scheduler ---
+    # "HH:MM" (24-hour) in `timezone`, above. Only read by
+    # `naukri-agent scheduler` (scheduler/daemon.py) — run-daily / discover /
+    # recommend are unaffected and still run immediately when invoked.
+    daily_run_time: str = "10:00"
+
+    @field_validator("daily_run_time")
+    @classmethod
+    def _validate_daily_run_time(cls, v: str) -> str:
+        parts = v.strip().split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
+        hour, minute = int(parts[0]), int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
+        return f"{hour:02d}:{minute:02d}"
 
     # --- Match explanation ---
     # Optional NL polish over the deterministic reasons/gaps. The

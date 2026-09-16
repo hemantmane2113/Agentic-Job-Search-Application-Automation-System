@@ -23,8 +23,8 @@ dependencies = [
     "playwright>=1.45",
     # -- Scope change: daily read-only match digest --
     "openpyxl>=3.1",           # Excel reporting mirror (regenerated from the DB)
-    # -- Deferred to Stage B --
-    # "apscheduler>=3.10"       # in-process scheduler (Stage A uses OS cron / run-daily)
+    # -- Stage B --
+    "apscheduler>=3.10",       # in-process daily scheduler (`naukri-agent scheduler`)
 ]
 
 [project.optional-dependencies]

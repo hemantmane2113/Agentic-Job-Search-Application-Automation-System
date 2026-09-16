@@ -14,11 +14,14 @@ attempts to bypass CAPTCHA, MFA, or anti-bot protections (Section 20).
 > built as **Stage A** (implemented). The Apply-workflow
 > reverse-engineering (Stage 1.5) is frozen in the tree, untouched.
 
-> **Status:** Stage A (daily match digest) implemented — read-only
+> **Status:** Stage A (daily match digest) and Stage B (real SMTP
+> email + in-process scheduler) are both implemented — read-only
 > discovery, deterministic ranking, application/cooldown-aware
-> filtering, manual application history, file/console digest (no SMTP
-> yet), 3-sheet Excel mirror. Not yet run live against Naukri; no real
-> email configured.
+> filtering, manual application history, file/console/SMTP digest
+> delivery, 3-sheet Excel mirror, and `naukri-agent scheduler` for
+> daily automation without relying on an OS-level cron entry. `EMAIL_
+> SENDER` still defaults to `file` — switching to `smtp` is a
+> deliberate opt-in step (see "Email setup" below).
 
 ## Architecture
 
@@ -34,13 +37,15 @@ naukri_agent/
 ├── resume/                # MasterResume (Phase 2); ResumeRegistry + selection (Phase 6)
 ├── jobs/                  # JobDiscovery, JobParser (Phase 3, 5)
 ├── matching/               # Deterministic scoring engine (Phase 4)
-├── agents/                  # Orchestration-level agents (Phases 4-6, 8-10)
-├── browser/                  # Playwright + Naukri client (Phase 7)
+├── agents/                  # (empty placeholder — unused)
+├── browser/                  # Playwright + Naukri client (Stage 1 read-only; Stage 1.5 frozen)
 ├── database/                  # SQLAlchemy models + session management
-├── scheduler/                  # Daily APScheduler job (Phase 11)
-├── notifications/                # Email summary (Phase 10)
-├── orchestration/                  # DailyJobPipeline (Phase 11)
-└── cli/                              # `naukri-agent <command>` entrypoint
+├── recommendations/            # build_digest: rank/filter JobMatch rows for the daily email
+├── reporting/                    # excel.py: 3-sheet workbook regenerated from the DB
+├── notifications/                  # FileEmailSender/ConsoleEmailSender/SmtpEmailSender
+├── orchestration/                    # discovery.py + pipeline.py: run_daily_recommendations
+├── scheduler/                          # Stage B: naukri-agent scheduler (daemon.py)
+└── cli/                                  # `naukri-agent <command>` entrypoint
 ```
 
 ### Browser automation (Phase 7)
@@ -83,7 +88,7 @@ Requires **Python 3.12+**.
 
 ```bash
 git clone <repo-url>
-cd naukri_agent
+cd Agentic-Job-Search-Application-Automation-System
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -167,7 +172,7 @@ Both `resumes.yaml` and the `resumes/` directory are gitignored.
 
 ```bash
 naukri-agent doctor        # verify environment is set up correctly
-naukri-agent run-daily     # discover -> understand -> rank -> digest (+ Excel); no email in Stage A
+naukri-agent run-daily     # discover -> understand -> rank -> digest (+ Excel); one-shot
 naukri-agent discover --query "Data Scientist @ Pune"   # read-only discovery only
 naukri-agent recommend --dry-run                        # full pipeline, digest to file
 naukri-agent export-excel --path ./out/history.xlsx     # regenerate the workbook from the DB
@@ -175,11 +180,11 @@ naukri-agent mark-applied <job-id|external-id|url> --status APPLIED --note "appl
 naukri-agent mark-status <job> INTERVIEW
 naukri-agent applications --status APPLIED              # the authoritative application history
 naukri-agent report                                    # re-print the latest digest
+naukri-agent scheduler                                 # Stage B: run run-daily automatically, once a day, forever (Ctrl+C to stop)
 ```
 
 `prepare` / `apply` raise `NotImplementedError` — application
-submission is out of scope. `scheduler` raises `NotImplementedError`
-(Stage B).
+submission is out of scope; use `mark-applied` to record one yourself.
 
 ## Dry-run mode
 
@@ -219,12 +224,28 @@ and regenerate `job_search_history.xlsx` from the database.
 
 ## Scheduler
 
-There is still no in-process scheduler (`naukri-agent scheduler` still
-raises `NotImplementedError`) — the OS scheduler is the scheduler, by
-design (smallest reliable option, one less thing to keep alive as a
-background Python process). This project has been validated (Run 23)
-running `naukri-agent run-daily` directly; the same command is what a
-scheduled task should invoke.
+Two equally valid ways to run the daily digest automatically — pick
+one, don't run both against the same database:
+
+1. **`naukri-agent scheduler` (Stage B, in-process)** — a single
+   foreground command (`scheduler/daemon.py`, built on APScheduler)
+   that blocks forever and fires `run_daily_recommendations` once a
+   day at `DAILY_RUN_TIME` (default `10:00`, 24-hour) in your
+   configured `TIMEZONE`. One bad day's run is logged and swallowed —
+   it never cancels tomorrow's firing. Stop it with Ctrl+C. This is
+   the simplest cross-platform option and needs nothing beyond keeping
+   one process alive (a terminal, `screen`/`tmux`, a system service
+   unit, etc.).
+2. **An OS-level scheduler** (Windows Task Scheduler / cron) invoking
+   `naukri-agent run-daily` directly on its own schedule — no
+   long-lived `naukri-agent` process at all between runs. This was the
+   original approach (validated in Run 23) and remains fully
+   supported; see the Windows walkthrough below if you'd rather not
+   keep a process running continuously.
+
+Both paths call the exact same `run_daily_recommendations` business
+logic in `orchestration/pipeline.py` — neither is "more correct" than
+the other.
 
 ### Windows Task Scheduler setup (daily 10:00 AM IST)
 
@@ -346,10 +367,11 @@ credentials:
   `@pytest.mark.manual` and excluded by default. Run with
   `pytest -m manual` — see `tests/manual/README.md`.
 
-Stage A adds 37 tests (recommendation ranking + cooldown semantics,
+Stage A added tests for recommendation ranking + cooldown semantics,
 application history, digest/Excel output, read-only job-detail fetch,
-end-to-end pipeline, new-table migration, CLI). Full non-manual suite:
-390 passed, 3 deselected.
+end-to-end pipeline, and new-table migration; Stage B added tests for
+the scheduler's job configuration and its safe-failure wrapper. Full
+non-manual suite: 847 passed, 3 deselected.
 
 ## Troubleshooting
 
@@ -385,5 +407,5 @@ actually exists on disk — reporting exactly which check failed.
 | 8 | Application preparation | ⛔ abandoned — application submission is out of scope |
 | 9 | Human approval interface | ⛔ abandoned |
 | A | Daily match digest (objective change) | ✅ done — discovery + JD fetch, deterministic ranking, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel, `RunEvent` audit |
-| B | Real SMTP email + scheduler | pending |
+| B | Real SMTP email + scheduler | ✅ done — `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`) and `naukri-agent scheduler` (in-process daily trigger); OS-level cron/Task Scheduler remains a supported alternative to the latter |
 | 12 | Testing, logging, error handling, docs polish | pending |
