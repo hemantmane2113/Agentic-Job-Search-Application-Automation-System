@@ -12,6 +12,20 @@ It is a companion to, not a replacement for:
 - Module docstrings — each one explains *why* that module exists, not
   just what it does; read them before changing behavior.
 
+> **This document predates the 2026-09-09 objective change and Stage A.**
+> It still describes `notifications/`, `orchestration/`, and
+> `recommendations/`/`reporting/` as empty placeholder packages — they
+> are not; Stage A (the daily match-digest pipeline: discovery → LLM
+> parse → deterministic scoring → resume selection → digest → email/
+> Excel export) is implemented and tested there. It also predates the
+> decision to drop automatic application submission entirely — see
+> `CLAUDE.md`'s "Objective change (2026-09-09)" section, which is the
+> authoritative, current account of what this system does and doesn't
+> do. The architecture and design-principles material below (matching
+> engine, LLM abstraction, database upsert patterns, selector
+> isolation, Stage 1 browser automation) is still accurate; treat
+> anything about Phase 7 Stage 2 / automatic applying as superseded.
+
 ---
 
 ## 1. What this project is
