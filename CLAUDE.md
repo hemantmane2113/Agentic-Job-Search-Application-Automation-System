@@ -30,6 +30,10 @@ with their Naukri links and concise reasons for the match."**
   untouched, not extended. Final application stays **manual**: the user
   applies on Naukri themselves and records it with `naukri-agent
   mark-applied`.
+  **Update 2026-09-17:** the user has asked to reconsider this — see
+  Phase 14 in the Phase status table below. Nothing here has changed
+  yet; this remains the current, correct description of the system
+  until Phase 14 is actually designed and approved.
 - The daily digest is implemented as **Stage A** (see its section
   below). Real SMTP email, any scheduler, and Stage 2 write-ops are
   explicitly **not** in Stage A.
@@ -125,6 +129,8 @@ before changing a module's behavior.
 | 7 Stage 2 — write operations (resume refresh, apply prep) | ⛔ ABANDONED — application submission is out of scope. |
 | A — daily match digest (objective change) | ✅ IMPLEMENTED 2026-09-09. read-only discovery + JD fetch, deterministic ranking, application/cooldown-aware filtering, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel mirror, `RunEvent` audit. |
 | B — real SMTP + scheduler | ✅ IMPLEMENTED. `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`, fails loudly if misconfigured rather than silently falling back) and `naukri-agent scheduler` (`scheduler/daemon.py`, APScheduler `BlockingScheduler`, fires daily at `DAILY_RUN_TIME` in `TIMEZONE`, a bad day's exception is logged and swallowed rather than cancelling tomorrow's firing). OS-level cron/Task Scheduler calling `run-daily` directly remains a fully supported alternative to the in-process scheduler — see README's "Scheduler" section. 855 passed, 3 deselected. Not yet run live with `EMAIL_SENDER=smtp` or under the in-process scheduler against real Naukri. |
+| 13 — fine-tuning (scoring accuracy, LLM reliability, digest format) | ⛔ PLANNED, not started. Requested 2026-09-17, prompted by a real digest: a job requiring "XGBoost" was scored as a skill gap even though the candidate's resume lists "Machine Learning" — raises an **open design question, not a decided change**: should a broad resume skill earn partial credit against a specific technique a job names? `skill_normalizer.py`'s explicit rule right now is that this is forbidden capability inference ("Python must never imply Django"), and `semantic_skill_matcher.py`'s Tier 3 — the one time broader semantic matching was tried — was empirically found to produce confident, wrong claims on exactly this "umbrella vs. specific" shape (real-Ollama testing: "Redis" claimed as a synonym of "MongoDB") and is deliberately kept disabled in production for that reason. Any fix here needs a deliberate, curated, partial-credit mechanism reviewed on its own merits — not a quiet exception to the existing rule. Also in scope: reducing "N job(s) could not be parsed by the LLM" failures, and digest content/format improvements. |
+| 14 — end-to-end automation: apply-on-behalf agent, human-approved | ⛔ PLANNED, not started. Requested 2026-09-17: **"building agents which would apply on my behalf after my approval."** This is an explicit reversal of the 2026-09-09 objective change (see above), which is the reason `prepare_application()` still raises `NotImplementedError` and Stage 1.5 is frozen. Read literally, this is the original Stage 2 design — application submission with human approval of each one — not fully unattended auto-apply (no mention of dropping the approval step). `browser/apply_inspection.py` already has real, tested safety machinery (CAPTCHA/MFA pause, default-deny network guard with one narrow allowlisted request, resume-control classification) from characterizing Naukri's real apply workflow — that is the starting point, not a from-scratch build, but reviving Stage 2 still needs its own explicit design/approval conversation before any code is written, per the working-style rule below. |
 
 ### Stage 1 history worth knowing
 
