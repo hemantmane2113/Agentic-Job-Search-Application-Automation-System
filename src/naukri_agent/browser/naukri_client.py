@@ -14,6 +14,8 @@ from naukri_agent.browser import login as _login
 from naukri_agent.browser import profile as _profile
 from naukri_agent.browser.models import (
     ApplicationWorkflowInspection,
+    ApplyUiInspection,
+    JobDetail,
     JobListingSummary,
     LoginResult,
     ResumeState,
@@ -44,8 +46,27 @@ class NaukriClient:
     def search_jobs(self, query: str, location: str = "") -> list[JobListingSummary]:
         return _jobs.search_jobs(self._page, query, location)
 
+    def fetch_job_detail(self, url: str) -> JobDetail:
+        """Read-only: open a job's public listing page and extract its
+        title/company/location/experience/salary/posted/description. Never
+        clicks/fills/submits; never touches the apply workflow."""
+        return _jobs.fetch_job_detail(self._page, url)
+
     def get_job(self, url: str) -> ApplicationWorkflowInspection:
         return _jobs.inspect_application_workflow(self._page, url)
+
+    def extract_application_ui(self) -> ApplyUiInspection:
+        """
+        Stage 1.5: READ the dynamically-rendered post-Apply UI on the
+        page as it is right now. Never clicks/fills/navigates. See
+        browser/apply_inspection.py for the full safety model — this is
+        inspection only, not an application step.
+        """
+        # Imported lazily: apply_inspection imports NaukriClient, so a
+        # module-level import here would be circular.
+        from naukri_agent.browser import apply_inspection as _apply
+
+        return _apply.extract_application_ui(self._page)
 
     def prepare_application(self, *args: Any, **kwargs: Any) -> Any:
         """

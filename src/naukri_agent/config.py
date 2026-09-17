@@ -146,6 +146,94 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     notify_email_to: str = ""
 
+    # --- Daily recommendation digest (scope change: read-only match digest) ---
+    # DB is the source of truth; Excel is a regenerated mirror; the LLM
+    # never determines score / application status / freshness / URLs.
+    daily_recommendation_limit: int = 10
+    # Minimum overall_score (0-100) for a match to be eligible for the
+    # email. None -> fall back to threshold_review.
+    recommendation_min_score: float | None = None
+    # A previously-recommended-but-NOT-APPLIED job is eligible again:
+    #   0   -> next run (no cooldown)
+    #   > 0 -> only after this many days since the last recommendation
+    recommendation_cooldown_days: int = 30
+    # ApplicationHistory statuses that exclude a job from ALL future
+    # recommendations, regardless of cooldown.
+    recommendation_exclude_if_status: list[str] = Field(
+        default_factory=lambda: ["APPLIED", "INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN"]
+    )
+    # MatchDecisions eligible for the digest.
+    recommendation_decisions: list[str] = Field(
+        default_factory=lambda: ["ACCEPT", "REVIEW"]
+    )
+    # A job first seen within this many days, never recommended, is
+    # labelled "Newly discovered".
+    freshness_new_days: int = 3
+
+    # --- Discovery ---
+    # Optional explicit "role @ location" query overrides; None -> derive
+    # from CandidateProfile.preferred_roles x preferred_locations.
+    discovery_queries: list[str] | None = None
+    discovery_max_jobs_per_query: int = 40
+    discovery_max_total_jobs: int = 200
+
+    # Freshness-first daily feed (Phase F1). After dedup and the
+    # discovery_max_total_jobs ceiling, discovery keeps only jobs whose
+    # Naukri search-card posted-date label parses to <= this many days,
+    # sorts them newest-first, and sends at most discovery_fresh_job_limit
+    # of them on to JD fetch + LLM parsing. Cards with an absent or
+    # unparseable posted label are excluded (never assumed fresh) and
+    # counted in the discover_freshness RunEvent. discovery_fresh_job_limit
+    # is the LLM/JD candidate-processing bound; it is deliberately larger
+    # than daily_recommendation_limit (the final digest cap) so the top-10
+    # matches can be found without the V1 175-200-job / multi-hour parse.
+    discovery_freshness_days: int = 7
+    discovery_fresh_job_limit: int = 60
+
+    # --- Manual application recording ---
+    mark_applied_default_status: str = "APPLIED"
+    # When `mark-applied` is run without --resume, use the job's stored
+    # ResumeSelection.resume_id.
+    mark_applied_default_resume_from_selection: bool = True
+
+    # --- Digest email delivery ---
+    # "file"    -> write the rendered digest under email_output_dir (default)
+    # "console" -> print it to stdout
+    # "smtp"    -> send real email via SmtpEmailSender (notifications/email.py);
+    #              requires smtp_host/smtp_username/smtp_password/notify_email_to
+    #              all set, or the run fails loudly (EmailConfigError) rather
+    #              than silently falling back to "file"
+    email_sender: str = "file"
+    email_output_dir: Path = Path("./out/emails")
+    email_subject_prefix: str = "[naukri-agent]"
+
+    # --- Stage B: in-process daily scheduler ---
+    # "HH:MM" (24-hour) in `timezone`, above. Only read by
+    # `naukri-agent scheduler` (scheduler/daemon.py) — run-daily / discover /
+    # recommend are unaffected and still run immediately when invoked.
+    daily_run_time: str = "10:00"
+
+    @field_validator("daily_run_time")
+    @classmethod
+    def _validate_daily_run_time(cls, v: str) -> str:
+        parts = v.strip().split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
+        hour, minute = int(parts[0]), int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
+        return f"{hour:02d}:{minute:02d}"
+
+    # --- Match explanation ---
+    # Optional NL polish over the deterministic reasons/gaps. The
+    # deterministic factors are always shown; the LLM never sets the
+    # score, application status, freshness label, or URL.
+    explanation_use_llm: bool = False
+
+    # --- Excel reporting mirror (regenerated from the DB every run) ---
+    excel_export_enabled: bool = True
+    excel_path: Path = Path("./out/job_search_history.xlsx")
+
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, v: str) -> str:
