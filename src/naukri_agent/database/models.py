@@ -35,7 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from naukri_agent.database.base import Base
-from naukri_agent.jobs.models import JobType
+from naukri_agent.jobs.models import EmailApplicationSignal, JobType
 from naukri_agent.matching.models import MatchDecision
 from naukri_agent.resume.registry import ResumeMatchVia, ResumeSelectionDecision
 
@@ -197,6 +197,15 @@ class JobExtraction(Base):
     education_requirements: Mapped[list | None] = mapped_column(JSON, nullable=True)
     job_type: Mapped[JobType | None] = mapped_column(Enum(JobType), nullable=True)
 
+    # Phase 15: a contact email literally present in the JD text, and
+    # what the text explicitly says about it — pure extraction, never a
+    # decision. See jobs/parser.py's _normalize_contact_email_in_payload
+    # and orchestration/email_outreach_runner.py for what acts on it.
+    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    email_application_signal: Mapped[EmailApplicationSignal | None] = mapped_column(
+        Enum(EmailApplicationSignal), nullable=True
+    )
+
     # The LLM's actual output, verbatim, before parsing into the
     # typed columns above. This is what makes the extraction step
     # auditable rather than a black box.
@@ -208,6 +217,117 @@ class JobExtraction(Base):
         return (
             f"<JobExtraction id={self.id} job_id={self.job_id} "
             f"version={self.extraction_version} current={self.is_current}>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Skill evidence (2026-09-11 hybrid-skill-source phase, persistence design
+# approved 2026-09-11). Two tables, deliberately kept at two different
+# lifecycle granularities -- see jobs/skill_evidence.py for the in-memory
+# SkillEvidence/MergedSkillEvidence types these mirror.
+# ---------------------------------------------------------------------------
+
+
+class JobRawSkillEvidence(Base):
+    """
+    Raw, scraped skill evidence for a job's CURRENT fetch — the
+    schema.org ld+json `skills` array, or the Key Skills DOM chip
+    widget. Nothing here is LLM-derived (see JobExtractionSkillEvidence
+    below for that layer).
+
+    job_id is the SPECIFIC fetched Job.id — NEVER canonicalized. A
+    repost is fetched independently (its own URL) and gets its own
+    row, matching JobExtraction.job_id / RunEvent.job_id, not
+    JobRecommendation's canonicalized convention.
+
+    REPLACED wholesale on every re-fetch (see
+    database.repositories.replace_raw_skill_evidence) — no historical
+    row is kept. This deliberately mirrors Job's OWN raw fields
+    (description, salary_text, experience_text, ...), which are
+    already overwritten in place on every re-sighting rather than
+    versioned; keeping a history here while every other raw field on
+    the same Job row is silently overwritten would be an inconsistent,
+    one-off exception to how this table's own parent already behaves.
+    """
+
+    __tablename__ = "job_raw_skill_evidence"
+    __table_args__ = (
+        UniqueConstraint("job_id", "source", "skill_text", name="uq_raw_skill_evidence"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)  # "ld_json" | "key_skills_dom"
+    skill_text: Mapped[str] = mapped_column(String(255), nullable=False)  # raw/original spelling
+    # True/False for key_skills_dom (Naukri's own preferred icon);
+    # NULL for ld_json (that shape carries no preferred/required
+    # signal at all — NULL correctly distinguishes "no signal" from
+    # "explicitly not preferred", never guessed as False).
+    preferred: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    fetched_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<JobRawSkillEvidence id={self.id} job_id={self.job_id} "
+            f"source={self.source!r} skill_text={self.skill_text!r}>"
+        )
+
+
+class JobExtractionSkillEvidence(Base):
+    """
+    Merged, one-row-per-skill DERIVED skill evidence for ONE SPECIFIC
+    JobExtraction version — see jobs/skill_evidence.py's
+    MergedSkillEvidence (classification, winning source, the tier-
+    based precedence policy, and the never-silently-resolved conflict
+    fields all come from there; this table is a straight persistence
+    of that type).
+
+    IMMUTABLE once written: a later JobExtraction version gets its OWN
+    full snapshot of rows (see
+    database.repositories.add_job_extraction_skill_evidence, called
+    once per add_job_extraction() call) — never updates or reuses a
+    previous version's rows. This is what preserves historical
+    reproducibility: an old extraction version's evidence stays fully
+    auditable even after a newer fetch has since replaced
+    JobRawSkillEvidence's snapshot, and even after a newer extraction
+    version exists.
+
+    skill_key is normalize_skill(skill) (matching.skill_normalizer),
+    persisted so the unique constraint enforces the SAME skill
+    identity the in-memory merge already uses — `skill` itself keeps
+    the original/display spelling.
+    """
+
+    __tablename__ = "job_extraction_skill_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_extraction_id", "skill_key", name="uq_extraction_skill_evidence"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_extraction_id: Mapped[int] = mapped_column(
+        ForeignKey("job_extractions.id"), nullable=False, index=True
+    )
+    skill: Mapped[str] = mapped_column(String(255), nullable=False)
+    skill_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    classification: Mapped[str] = mapped_column(String(15), nullable=False)  # required|preferred|unclassified
+    winning_source: Mapped[str] = mapped_column(String(30), nullable=False)
+    # list[str] -- every source (classified or not) that mentioned this
+    # skill; corroboration/audit only, never a scoring input.
+    contributing_sources: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    classification_conflict: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # list[[classification, source], ...] -- every distinct classified
+    # claim that LOST to the winner. Empty when there was no conflict.
+    conflicting_classifications: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<JobExtractionSkillEvidence id={self.id} "
+            f"job_extraction_id={self.job_extraction_id} skill={self.skill!r} "
+            f"classification={self.classification!r}>"
         )
 
 
@@ -301,5 +421,301 @@ class ResumeSelection(Base):
         return (
             f"<ResumeSelection id={self.id} job_id={self.job_id} "
             f"resume_id={self.resume_id!r} decision={self.decision.value}>"
+        )
+
+
+# ===========================================================================
+# Scope change: read-only daily match digest.
+#
+# Three SEPARATE axes, never conflated:
+#   - discovery      : Job / JobExtraction / RunEvent
+#   - recommendation : JobRecommendation  (a job appeared in an email)
+#   - application    : ApplicationHistory / ApplicationEvent
+#                      (the human actually applied — the DB is the ONLY
+#                       authority; never inferred, never LLM-set)
+# A JobRecommendation row NEVER implies an ApplicationHistory row.
+# ===========================================================================
+
+
+class ApplicationStatus(str, enum.Enum):
+    NOT_APPLIED = "NOT_APPLIED"  # explicit "reviewed, not applying"; absence of a row means the same
+    APPLIED = "APPLIED"
+    INTERVIEW = "INTERVIEW"
+    OFFER = "OFFER"
+    REJECTED = "REJECTED"
+    WITHDRAWN = "WITHDRAWN"
+    UNKNOWN = "UNKNOWN"
+
+
+class RunEventStatus(str, enum.Enum):
+    OK = "ok"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class ApplicationHistory(Base):
+    """
+    The authoritative record of whether the human applied to a job.
+    Written ONLY by the manual `mark-applied` / `mark-status` CLI (or a
+    future explicit import) — never by discovery, never by the
+    recommendation pipeline, never by an LLM. `job_id` is the CANONICAL
+    job id (repost root), so a repost of an applied job resolves to the
+    same row. Unique on job_id: one application record per underlying
+    position; re-marking updates this row (+ an ApplicationEvent),
+    never a duplicate.
+    """
+
+    __tablename__ = "application_history"
+    __table_args__ = (UniqueConstraint("job_id", name="uq_application_history_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+
+    external_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    job_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    job_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    company: Mapped[str] = mapped_column(String(500), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    status: Mapped[ApplicationStatus] = mapped_column(
+        Enum(ApplicationStatus), default=ApplicationStatus.APPLIED, nullable=False, index=True
+    )
+    applied_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+    resume_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resume_file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    resume_file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    source: Mapped[str] = mapped_column(String(50), default="manual_cli", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+
+    events: Mapped[list["ApplicationEvent"]] = relationship(back_populates="application")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<ApplicationHistory id={self.id} job_id={self.job_id} "
+            f"status={self.status.value}>"
+        )
+
+
+class ApplicationEvent(Base):
+    """Audit trail of ApplicationHistory status transitions."""
+
+    __tablename__ = "application_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("application_history.id"), nullable=False, index=True
+    )
+    from_status: Mapped[ApplicationStatus | None] = mapped_column(
+        Enum(ApplicationStatus), nullable=True
+    )
+    to_status: Mapped[ApplicationStatus] = mapped_column(Enum(ApplicationStatus), nullable=False)
+    at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(50), default="manual_cli", nullable=False)
+    note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    application: Mapped["ApplicationHistory"] = relationship(back_populates="events")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<ApplicationEvent id={self.id} app_id={self.application_id} "
+            f"{self.from_status} -> {self.to_status.value}>"
+        )
+
+
+class JobRecommendation(Base):
+    """
+    Recommendation / email history: one row per (candidate, job, run)
+    where the job appeared in the daily digest. Existence here does NOT
+    mean the human applied. `job_id` is the CANONICAL job id.
+    """
+
+    __tablename__ = "job_recommendations"
+    __table_args__ = (
+        UniqueConstraint(
+            "candidate_id", "job_id", "daily_run_id", name="uq_job_recommendation_run"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"), nullable=False)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    job_match_id: Mapped[int | None] = mapped_column(ForeignKey("job_matches.id"), nullable=True)
+    daily_run_id: Mapped[int | None] = mapped_column(ForeignKey("daily_runs.id"), nullable=True)
+
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    score_at_email: Mapped[float] = mapped_column(Float, nullable=False)
+    decision_at_email: Mapped[MatchDecision] = mapped_column(Enum(MatchDecision), nullable=False)
+    application_status_at_email: Mapped[ApplicationStatus] = mapped_column(
+        Enum(ApplicationStatus), default=ApplicationStatus.NOT_APPLIED, nullable=False
+    )
+    resume_id_at_email: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    recommended_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False, index=True
+    )
+    email_status: Mapped[str] = mapped_column(String(20), default="rendered", nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<JobRecommendation id={self.id} candidate_id={self.candidate_id} "
+            f"job_id={self.job_id} run={self.daily_run_id} rank={self.rank}>"
+        )
+
+
+class ApplicationQuestion(Base):
+    """
+    Audit log of one screening question asked during a Phase 14 apply
+    attempt — never consulted by scoring/matching/recommendation logic,
+    same framing as JobRecommendation/RunEvent. `job_id` is the
+    CANONICAL job id, same convention as ApplicationHistory.
+
+    `attempt_id` (a uuid4 hex, one per `apply` invocation) groups every
+    question asked during one run — a job can be attempted more than
+    once (aborted, retried), so this is NOT unique per job_id.
+    `application_id` starts NULL (a question can be asked before any
+    ApplicationHistory row exists, e.g. the human aborts at the final
+    confirm) and is backfilled only once that attempt's submission is
+    confirmed — see database.repositories.link_application_questions_to_history.
+    Rows already written are NEVER deleted on an abort; the audit trail
+    of what was asked/drafted/answered stays intact either way.
+    """
+
+    __tablename__ = "application_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    application_id: Mapped[int | None] = mapped_column(
+        ForeignKey("application_history.id"), nullable=True, index=True
+    )
+    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    order_in_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    was_skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    drafted_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    human_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    asked_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<ApplicationQuestion id={self.id} job_id={self.job_id} "
+            f"attempt_id={self.attempt_id!r} skipped={self.was_skipped}>"
+        )
+
+
+class RunEvent(Base):
+    """Per-stage audit record for one DailyRun. `detail` is SHORT and
+    non-sensitive (counts, error class + short message, query name) —
+    never credentials, cookies, tokens, PII, raw JD text or LLM output."""
+
+    __tablename__ = "run_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    daily_run_id: Mapped[int] = mapped_column(ForeignKey("daily_runs.id"), nullable=False, index=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[RunEventStatus] = mapped_column(Enum(RunEventStatus), nullable=False)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return f"<RunEvent id={self.id} run={self.daily_run_id} {self.stage}={self.status.value}>"
+
+
+class EmailOutreachMode(str, enum.Enum):
+    APPLICATION = "APPLICATION"  # the JD explicitly asked candidates to email their resume
+    COLD_OUTREACH = "COLD_OUTREACH"  # a contact email was merely mentioned; NOT an application
+
+
+class EmailOutreachStatus(str, enum.Enum):
+    DRAFTED = "DRAFTED"
+    SENT = "SENT"
+    ABORTED = "ABORTED"
+
+
+class EmailOutreachAttempt(Base):
+    """
+    Audit log of one Phase 15 email-outreach attempt — never consulted
+    by scoring/matching/recommendation logic, same framing as
+    ApplicationQuestion/JobRecommendation/RunEvent. `job_id` is the
+    CANONICAL job id, same convention as ApplicationHistory.
+
+    Mode is resolved deterministically (never by the LLM) from the
+    job's own JobExtraction.email_application_signal:
+    APPLY_VIA_EMAIL -> APPLICATION, CONTACT_ONLY -> COLD_OUTREACH.
+    A confirmed APPLICATION-mode send also creates/updates an
+    ApplicationHistory row (source="agent_email_apply") and backfills
+    `application_id` here; COLD_OUTREACH never touches
+    ApplicationHistory, so this project's "recommendation vs.
+    application, never conflated" rule holds even for this new path.
+
+    Same persistence-timing precedent as ApplicationQuestion: a row is
+    inserted as DRAFTED immediately after drafting (before the human
+    review pause), then the SAME row is updated to SENT or ABORTED --
+    never deleted -- so a declined/failed send still leaves a durable
+    audit trail of what was drafted and shown to the human.
+
+    `drafted_subject`/`drafted_body`/`final_subject`/`final_body` hold
+    the full real text: this is a live, human-supervised flow (the
+    human reviews/edits exactly this content before anything sends),
+    not a sanitized background log like apply_inspection.py's.
+    """
+
+    __tablename__ = "email_outreach_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    application_id: Mapped[int | None] = mapped_column(
+        ForeignKey("application_history.id"), nullable=True, index=True
+    )
+    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    mode: Mapped[EmailOutreachMode] = mapped_column(Enum(EmailOutreachMode), nullable=False)
+    status: Mapped[EmailOutreachStatus] = mapped_column(
+        Enum(EmailOutreachStatus), default=EmailOutreachStatus.DRAFTED, nullable=False, index=True
+    )
+    recipient_email: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    drafted_subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    drafted_body: Mapped[str] = mapped_column(Text, nullable=False)
+    final_subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    final_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    human_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    resume_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resume_file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    drafted_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    aborted_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<EmailOutreachAttempt id={self.id} job_id={self.job_id} "
+            f"mode={self.mode.value} status={self.status.value}>"
         )
 

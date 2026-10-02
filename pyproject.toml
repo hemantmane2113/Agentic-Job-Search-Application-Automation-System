@@ -21,8 +21,10 @@ dependencies = [
     "openai>=1.30",
     # -- Phase 7 --
     "playwright>=1.45",
-    # -- Added in later phases (kept here as the project grows) --
-    # "apscheduler>=3.10"       # Phase 11 - scheduling
+    # -- Scope change: daily read-only match digest --
+    "openpyxl>=3.1",           # Excel reporting mirror (regenerated from the DB)
+    # -- Stage B --
+    "apscheduler>=3.10",       # in-process daily scheduler (`naukri-agent scheduler`)
 ]
 
 [project.optional-dependencies]

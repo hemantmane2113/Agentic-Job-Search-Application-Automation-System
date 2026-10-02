@@ -263,16 +263,23 @@ def test_captcha_then_settle_then_still_unauthenticated_retries_exactly_once(tmp
     _patch_browser_manager(monkeypatch, manager)
 
     def fake_wait(prompt: str) -> None:
-        # Captcha resolved, but session still isn't authenticated by
-        # any signal -- e.g. the human closed the dialog without
-        # actually completing it.
+        # Captcha resolved, but the session still isn't authenticated by
+        # any signal -- e.g. the human closed the dialog without actually
+        # completing it. The retry therefore lands on a real login form
+        # (page stays on /nlogin/login, no /mnjuser redirect) and must
+        # run the full form flow; submitting it then authenticates.
         manager.page._elements.pop(selectors.CAPTCHA_INDICATOR, None)
 
-        def succeed_on_retry(url):
+        def present_login_form(url):
+            manager.page.set_element(selectors.LOGIN_EMAIL_INPUT, FakeElement())
+
+        def authenticate_on_submit(_selector):
             manager.page.url = "https://www.naukri.com/mnjuser/homepage"
+            manager.page.set_element(selectors.AUTHENTICATED_NAV_INDICATOR, FakeElement())
             manager.page.set_element(selectors.JOB_CARD, [])
 
-        manager.page.on_goto = succeed_on_retry
+        manager.page.on_goto = present_login_form
+        manager.page.on_click = authenticate_on_submit
 
     report = run_inspection(_settings(tmp_path), wait_for_manual_completion=fake_wait)
 
@@ -330,6 +337,28 @@ def test_playwright_error_during_retry_also_produces_structured_report(tmp_path,
     assert report["completed"] is False
     assert report["error_type"] == "TimeoutError"
     assert manager.closed is True
+
+
+def test_record_failure_is_connection_safe_when_page_is_dead(tmp_path):
+    """
+    Recording a failure must never itself raise — even when the
+    Playwright connection is already gone and every page access
+    (page.url, page.content(), page.screenshot()) raises "Connection
+    closed while reading from the driver". This is what previously
+    masked the real error and crashed in BrowserManager.__exit__.
+    """
+    from naukri_agent.browser.inspection import _record_failure
+
+    page = FakePage()
+    page.simulate_connection_loss()
+
+    report = {"steps": [{"step": "login"}]}
+    _record_failure(report, page, tmp_path / "out", RuntimeError("the real problem"))
+
+    assert report["error_type"] == "RuntimeError"
+    assert report["error"] == "the real problem"
+    assert report["current_url"] is None  # unreadable, not a crash
+    assert report["stopped_at"] == "login"
 
 
 def test_unexpected_programming_error_is_not_swallowed(tmp_path, monkeypatch):

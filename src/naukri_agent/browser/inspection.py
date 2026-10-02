@@ -61,6 +61,20 @@ from naukri_agent.config import Settings
 logger = logging.getLogger(__name__)
 
 
+def _safe_page_url(page: Any) -> str | None:
+    """
+    Read page.url defensively. On a dead Playwright connection the
+    `url` property RAISES ("Connection closed while reading from the
+    driver") rather than being absent, so `getattr(page, "url", None)`
+    is not enough — its default only covers AttributeError. Recording a
+    failure must never itself fail.
+    """
+    try:
+        return page.url
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _save_snapshot(page: Any, out_dir: Path, name: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -87,7 +101,7 @@ def _record_failure(report: dict, page: Any, out_dir: Path, exc: Exception) -> N
     report["stopped_at"] = report["steps"][-1]["step"] if report["steps"] else "login"
     report["error_type"] = type(exc).__name__
     report["error"] = str(exc)
-    report["current_url"] = getattr(page, "url", None)
+    report["current_url"] = _safe_page_url(page)
     _save_snapshot(page, out_dir, "stopped_state")
 
 

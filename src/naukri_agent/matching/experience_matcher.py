@@ -28,6 +28,15 @@ from naukri_agent.matching.models import CategoryScore, ExperienceProfile
 from naukri_agent.matching.skill_normalizer import normalize_skill
 from naukri_agent.resume.models import MasterResume
 
+# Shared grace window around an explicitly stated minimum-experience
+# requirement. A shortfall within this many years is "close enough" to
+# round to the requirement (score_experience below gives partial credit
+# instead of the harsher below-minimum credit); a shortfall beyond it is
+# a genuine, explicit violation. scorer.py's hard REJECT override for
+# explicit minimum-experience violations reuses this exact constant so
+# the two checks can never drift apart.
+EXPERIENCE_SLIGHT_SHORTFALL_GRACE_YEARS = 0.5
+
 
 def derive_skill_years_from_resume(resume: MasterResume) -> dict[str, float]:
     """
@@ -94,7 +103,7 @@ def score_experience(
 
     if exp_min is not None and experience.total_years < exp_min:
         shortfall = exp_min - experience.total_years
-        if shortfall <= 0.5:
+        if shortfall <= EXPERIENCE_SLIGHT_SHORTFALL_GRACE_YEARS:
             # Close enough to round to the requirement — partial credit.
             return CategoryScore(
                 points=max_points * 0.75,

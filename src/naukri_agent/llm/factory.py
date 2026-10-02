@@ -66,3 +66,31 @@ def get_resume_llm_provider(settings: Settings) -> LLMProvider:
     provider = settings.resume_llm_provider or settings.llm_provider
     model = settings.resume_llm_model or settings.llm_model
     return build_llm_provider(provider, model, settings)
+
+
+def get_apply_llm_provider(settings: Settings) -> LLMProvider:
+    """
+    Build the provider used for apply-answer drafting
+    (agents/apply_answer_agent.py's draft_application_answer) — drafts
+    only, never the final content; a human approves/edits every answer
+    before it's ever typed into a real application. Falls back to the
+    default LLM_PROVIDER/LLM_MODEL when APPLY_LLM_PROVIDER/APPLY_LLM_MODEL
+    aren't set, same shape as get_resume_llm_provider above.
+    """
+    provider = settings.apply_llm_provider or settings.llm_provider
+    model = settings.apply_llm_model or settings.llm_model
+    return build_llm_provider(provider, model, settings)
+
+
+def get_email_llm_provider(settings: Settings) -> LLMProvider:
+    """
+    Build the provider used for cold-email / apply-by-email drafting
+    (agents/cold_email_agent.py) — drafts only, never the final content;
+    a human reviews/edits every email before it's ever sent. Falls back
+    to the default LLM_PROVIDER/LLM_MODEL when
+    EMAIL_LLM_PROVIDER/EMAIL_LLM_MODEL aren't set, same shape as
+    get_apply_llm_provider above.
+    """
+    provider = settings.email_llm_provider or settings.llm_provider
+    model = settings.email_llm_model or settings.llm_model
+    return build_llm_provider(provider, model, settings)

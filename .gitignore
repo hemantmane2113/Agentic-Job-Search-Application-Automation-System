@@ -47,3 +47,6 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
+
+config/backup/
+out/

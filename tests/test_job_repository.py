@@ -1,7 +1,11 @@
 from naukri_agent.config import Settings
 from naukri_agent.database.base import init_db, session_scope
 from naukri_agent.database.models import DailyRun, Job, JobExtraction
-from naukri_agent.database.repositories import add_job_extraction, upsert_job
+from naukri_agent.database.repositories import (
+    add_job_extraction,
+    canonical_job_id,
+    upsert_job,
+)
 from naukri_agent.jobs.models import JobCreate, JobExtractionCreate, JobType
 
 
@@ -102,6 +106,126 @@ def test_genuinely_different_job_is_not_linked_as_repost():
             ),
         )
         assert job.repost_of_job_id is None
+
+
+# --- Stale repost repair (run-1 empty-content -> run-6 distinct-content bug) ---
+
+_URL_A = "https://www.naukri.com/job-listings-a-100001"
+_URL_B = "https://www.naukri.com/job-listings-b-200002"
+_EMPTY = dict(title="(unknown title)", company="(unknown company)", description="")
+
+
+def test_stale_repost_link_is_repaired_when_a_later_fetch_proves_distinct_content():
+    """Run 1: both listings fetched as identical empty content, so B was
+    stored as repost_of A. Run 6: real, distinct content for both -> the
+    stale link must be broken so canonical_job_id() stops collapsing."""
+    sf = init_db(_in_memory_settings())
+    with session_scope(sf) as s:
+        a, _ = upsert_job(s, _job(url=_URL_A, **_EMPTY))
+        b, created = upsert_job(s, _job(url=_URL_B, **_EMPTY))
+        assert created is True
+        assert b.repost_of_job_id == a.id  # the false link forms exactly as in run 1
+        a_id, b_id = a.id, b.id
+
+    with session_scope(sf) as s:  # run 6: distinct real content
+        upsert_job(s, _job(url=_URL_A, title="Gen AI Data Scientist",
+                           company="Sigma Allied Services", description="Build LLM/RAG systems."))
+        upsert_job(s, _job(url=_URL_B, title="Senior Data Scientist",
+                           company="NiCE", description="Own the fraud-detection models."))
+
+    with session_scope(sf) as s:
+        a, b = s.get(Job, a_id), s.get(Job, b_id)
+        assert a.repost_of_job_id is None
+        assert b.repost_of_job_id is None  # stale link repaired
+        assert a.content_fingerprint != b.content_fingerprint
+        assert canonical_job_id(s, a_id) == a_id
+        assert canonical_job_id(s, b_id) == b_id  # no longer collapses into A
+        assert s.query(Job).count() == 2  # nothing merged or deleted
+
+
+def test_stale_repost_repair_when_only_the_parent_row_is_reseen():
+    """Order-independence: re-sighting the PARENT with new content also
+    promotes children whose content no longer matches it."""
+    sf = init_db(_in_memory_settings())
+    with session_scope(sf) as s:
+        a, _ = upsert_job(s, _job(url=_URL_A, **_EMPTY))
+        b, _ = upsert_job(s, _job(url=_URL_B, **_EMPTY))
+        a_id, b_id = a.id, b.id
+        assert b.repost_of_job_id == a_id
+
+    with session_scope(sf) as s:  # only A re-sighted
+        upsert_job(s, _job(url=_URL_A, title="Role A", company="Co A", description="Real A."))
+
+    with session_scope(sf) as s:
+        assert s.get(Job, b_id).repost_of_job_id is None
+        assert canonical_job_id(s, b_id) == b_id
+
+
+def test_genuine_repost_survives_a_resighting_with_still_identical_content():
+    """Requirement 7: a real repost (different URL, content STILL identical
+    to the original) must NOT be broken by the repair."""
+    sf = init_db(_in_memory_settings())
+    body = dict(title="Data Scientist", company="Acme", description="Python + SQL role.")
+    with session_scope(sf) as s:
+        a, _ = upsert_job(s, _job(url=_URL_A, **body))
+        b, _ = upsert_job(s, _job(url=_URL_B, **body))
+        a_id, b_id = a.id, b.id
+        assert b.repost_of_job_id == a_id
+
+    with session_scope(sf) as s:  # Naukri reposts B verbatim; content still == A
+        upsert_job(s, _job(url=_URL_B, **body))
+
+    with session_scope(sf) as s:
+        b = s.get(Job, b_id)
+        assert b.repost_of_job_id == a_id  # link intact
+        assert canonical_job_id(s, b_id) == a_id
+
+
+def test_stale_repost_repair_is_idempotent():
+    sf = init_db(_in_memory_settings())
+    with session_scope(sf) as s:
+        a, _ = upsert_job(s, _job(url=_URL_A, **_EMPTY))
+        b, _ = upsert_job(s, _job(url=_URL_B, **_EMPTY))
+        b_id = b.id
+    with session_scope(sf) as s:
+        upsert_job(s, _job(url=_URL_A, title="A", company="A", description="aaa"))
+        upsert_job(s, _job(url=_URL_B, title="B", company="B", description="bbb"))
+    with session_scope(sf) as s:
+        assert s.get(Job, b_id).repost_of_job_id is None
+    with session_scope(sf) as s:  # re-sight again, still distinct
+        upsert_job(s, _job(url=_URL_B, title="B", company="B", description="bbb v2"))
+    with session_scope(sf) as s:
+        assert s.get(Job, b_id).repost_of_job_id is None  # stays None, no error
+
+
+def test_repair_does_not_move_historical_records_off_their_original_job_ids():
+    """Requirement 6: an application recorded during the buggy window
+    keeps the job_id it was written with; the repair only affects future
+    canonical resolution."""
+    from naukri_agent.database.models import ApplicationHistory, ApplicationStatus
+    from naukri_agent.database.repositories import upsert_application_history
+
+    sf = init_db(_in_memory_settings())
+    with session_scope(sf) as s:
+        a, _ = upsert_job(s, _job(url=_URL_A, **_EMPTY))
+        b, _ = upsert_job(s, _job(url=_URL_B, **_EMPTY))
+        a_id, b_id = a.id, b.id
+        assert b.repost_of_job_id == a_id
+
+    with session_scope(sf) as s:  # applied against B while B is (wrongly) a repost of A
+        row, _ = upsert_application_history(s, b_id, status=ApplicationStatus.APPLIED)
+        assert row.job_id == a_id  # written against the then-canonical root
+
+    with session_scope(sf) as s:  # later: distinct content -> repair splits them
+        upsert_job(s, _job(url=_URL_A, title="A real", company="A", description="aaa"))
+        upsert_job(s, _job(url=_URL_B, title="B real", company="B", description="bbb"))
+
+    with session_scope(sf) as s:
+        rows = s.query(ApplicationHistory).all()
+        assert len(rows) == 1
+        assert rows[0].job_id == a_id  # NOT rewritten by the repair
+        assert canonical_job_id(s, a_id) == a_id
+        assert canonical_job_id(s, b_id) == b_id
 
 
 # --- DailyRun linkage ---
