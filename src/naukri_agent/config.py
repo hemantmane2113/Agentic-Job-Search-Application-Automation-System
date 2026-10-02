@@ -126,7 +126,20 @@ class Settings(BaseSettings):
     apply_llm_provider: LLMProviderName | None = None
     apply_llm_model: str | None = None
 
-
+    # --- Cold-email / apply-by-email agent (Phase 15) ---
+    # Same double-gate shape as auto_apply: both AUTO_EMAIL_OUTREACH=true
+    # AND dry_run=false are required before `email-outreach` will even
+    # start — see cli/main.py. max_emails_per_day caps application-by-
+    # email + cold-outreach sends COMBINED, to protect the user's own
+    # email account's deliverability/reputation; enforced by
+    # orchestration/email_outreach_runner.py via
+    # database/repositories.py::count_emails_sent_today.
+    auto_email_outreach: bool = False
+    max_emails_per_day: int = 5
+    # Optional: falls back to LLM_PROVIDER/LLM_MODEL if unset, same shape
+    # as apply_llm_provider above.
+    email_llm_provider: LLMProviderName | None = None
+    email_llm_model: str | None = None
 
     # --- LLM: provider and model are configured independently. ---
     # llm_provider says WHO to call (ollama / groq / openai).

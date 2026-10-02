@@ -17,12 +17,15 @@ from naukri_agent.database.models import (
     ApplicationHistory,
     ApplicationStatus,
     Base,
+    EmailOutreachAttempt,
+    EmailOutreachMode,
     JobExtractionSkillEvidence,
     JobRawSkillEvidence,
     JobRecommendation,
     RunEvent,
 )
 from naukri_agent.database.repositories import (
+    add_email_outreach_attempt,
     application_status_for_job,
     replace_raw_skill_evidence,
     upsert_application_history,
@@ -37,6 +40,7 @@ _NEW_TABLES = {
     "run_events",
     "job_raw_skill_evidence",
     "job_extraction_skill_evidence",
+    "email_outreach_attempts",
 }
 
 
@@ -89,6 +93,14 @@ def test_init_db_adds_new_tables_and_keeps_existing_rows(tmp_path):
         assert s.query(RunEvent).count() == 0
         assert s.query(JobRawSkillEvidence).count() == 0
         assert s.query(JobExtractionSkillEvidence).count() == 0
+        assert s.query(EmailOutreachAttempt).count() == 0
+
+        # the new email-outreach-attempts table is usable against the legacy job row
+        attempt = add_email_outreach_attempt(
+            s, job_id=legacy_job_id, attempt_id="att-legacy", mode=EmailOutreachMode.COLD_OUTREACH,
+            recipient_email="hr@oldco.com", drafted_subject="s", drafted_body="b",
+        )
+        assert attempt.job_id == legacy_job_id
 
         assert application_status_for_job(s, legacy_job_id) == ApplicationStatus.NOT_APPLIED
         row, created = upsert_application_history(

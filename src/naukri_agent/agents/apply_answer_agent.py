@@ -37,6 +37,7 @@ import logging
 
 from pydantic import BaseModel, ValidationError
 
+from naukri_agent.agents.grounding import candidate_facts, resume_facts
 from naukri_agent.candidate.models import CandidateProfile
 from naukri_agent.llm.base import LLMProvider
 from naukri_agent.llm.exceptions import LLMError
@@ -51,48 +52,8 @@ class ApplyAnswerDraft(BaseModel):
     reason: str  # short, for the human reviewing it — not a confidence score
 
 
-def _candidate_facts(candidate: CandidateProfile) -> dict:
-    """Flattened, JSON-safe facts an answer is permitted to draw on.
-    Deliberately a plain subset dump, not the full model — nothing
-    here should ever reference internal-only fields."""
-    return {
-        "full_name": candidate.full_name,
-        "years_experience": candidate.years_experience,
-        "skills": candidate.skills,
-        "preferred_roles": candidate.preferred_roles,
-        "preferred_locations": candidate.preferred_locations,
-        "work_mode": candidate.work_mode.value,
-        "expected_salary_min_lpa": candidate.expected_salary_min_lpa,
-        "expected_salary_max_lpa": candidate.expected_salary_max_lpa,
-        "notice_period_days": candidate.notice_period_days,
-    }
-
-
-def _resume_facts(resume: MasterResume) -> dict:
-    return {
-        "professional_summary": resume.professional_summary,
-        "skills": resume.skills,
-        "total_years_experience": resume.total_years_experience(),
-        "work_experience": [
-            {
-                "company": w.company,
-                "title": w.title,
-                "start_date": str(w.start_date),
-                "end_date": str(w.end_date) if w.end_date else "present",
-                "technologies": w.technologies,
-            }
-            for w in resume.work_experience
-        ],
-        "education": [
-            {"institution": e.institution, "degree": e.degree, "field_of_study": e.field_of_study}
-            for e in resume.education
-        ],
-        "certifications": [c.name for c in resume.certifications],
-    }
-
-
 def _system_prompt(candidate: CandidateProfile, resume: MasterResume, job_title: str, company: str) -> str:
-    facts = {"candidate": _candidate_facts(candidate), "resume": _resume_facts(resume)}
+    facts = {"candidate": candidate_facts(candidate), "resume": resume_facts(resume)}
     return f"""You draft a short, factual answer to ONE question from a job application form, on behalf of this candidate, for the role of {job_title!r} at {company!r}.
 
 Use ONLY the facts given below. Never invent a company, number, date, skill, or qualification not present here. If these facts don't let you answer truthfully, say so plainly in "answer" rather than guessing.

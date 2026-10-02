@@ -33,11 +33,16 @@ import logging
 import re
 from typing import NamedTuple
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, EmailStr, Field, ValidationError
 
 from naukri_agent.database.models import Job
 from naukri_agent.database.repositories import add_job_extraction
-from naukri_agent.jobs.models import JobExtractionCreate, JobType, LLMJobExtractionPayload
+from naukri_agent.jobs.models import (
+    EmailApplicationSignal,
+    JobExtractionCreate,
+    JobType,
+    LLMJobExtractionPayload,
+)
 from naukri_agent.llm.base import LLMProvider
 from naukri_agent.llm.exceptions import LLMError
 from naukri_agent.llm.response_parsing import extract_json_text
@@ -136,6 +141,68 @@ def _normalize_job_type_in_payload(data: object) -> list[str]:
         return []
     data["job_type"] = mapped
     return [f"job_type: {original!r} -> {mapped!r}"]
+
+
+# --- Deterministic contact-email normalisation (Phase 15) ------------------
+#
+# Mirrors _normalize_job_type_in_payload's role exactly: the LLM only ever
+# EXTRACTS what the JD text literally states (see SYSTEM_PROMPT's rules
+# below); this function is the deterministic, Python-side final arbiter
+# of whether that extraction is actually actionable, never relaxing or
+# widening what the model is allowed to claim. A signal with no address
+# to act on is meaningless, so it is always coerced back to "none" here
+# -- orchestration/email_outreach_runner.py (Phase 15) can then trust
+# that email_application_signal != "none" implies contact_email is a
+# syntactically valid address, without re-validating itself.
+
+
+class _EmailSyntaxCheck(BaseModel):
+    email: EmailStr
+
+
+def _is_syntactically_valid_email(value: str) -> bool:
+    try:
+        _EmailSyntaxCheck(email=value)
+        return True
+    except ValidationError:
+        return False
+
+
+def _normalize_contact_email_in_payload(data: object) -> list[str]:
+    """
+    Deterministic guard, run BEFORE LLMJobExtractionPayload validation:
+
+      - a non-null contact_email that fails basic email syntax is
+        dropped to null, and email_application_signal is forced to
+        "none" (can't act on an unusable address).
+      - email_application_signal != "none" with no contact_email (or a
+        now-dropped one) is forced back to "none".
+
+    Returns a list of human-readable audit records, same convention as
+    _normalize_job_type_in_payload — empty when nothing needed coercing.
+    Never raises; a malformed `data` shape is left for
+    LLMJobExtractionPayload to reject normally.
+    """
+    if not isinstance(data, dict):
+        return []
+    notes: list[str] = []
+
+    email = data.get("contact_email")
+    if isinstance(email, str) and email.strip() and not _is_syntactically_valid_email(email.strip()):
+        notes.append(f"contact_email: {email!r} -> null (not a syntactically valid email)")
+        data["contact_email"] = None
+
+    signal = data.get("email_application_signal")
+    has_usable_email = isinstance(data.get("contact_email"), str) and bool(
+        (data.get("contact_email") or "").strip()
+    )
+    if isinstance(signal, str) and signal != EmailApplicationSignal.NONE.value and not has_usable_email:
+        notes.append(
+            f"email_application_signal: {signal!r} -> 'none' (no usable contact_email present)"
+        )
+        data["email_application_signal"] = EmailApplicationSignal.NONE.value
+
+    return notes
 
 
 # --- Deterministic experience-source reconciliation & conflict detection --
@@ -618,7 +685,9 @@ Return ONLY a single JSON object with exactly these fields, and nothing else —
   "salary_max": number or null,
   "salary_currency": string or null,
   "education_requirements": array of strings (use [] when none are stated; never null),
-  "job_type": exactly one of "full_time", "part_time", "contract", "internship", "unknown"
+  "job_type": exactly one of "full_time", "part_time", "contract", "internship", "unknown",
+  "contact_email": string or null (an email address, ONLY if the text literally contains one; never invent, guess, or construct one from a company name/domain),
+  "email_application_signal": exactly one of "none", "contact_only", "apply_via_email"
 }
 
 Classification rules — be conservative:
@@ -640,6 +709,7 @@ Classification rules — be conservative:
 - job_type is the EMPLOYMENT type only. Its value MUST be exactly one of: "full_time", "part_time", "contract", "internship", "unknown" — and nothing else. If the employment type is not explicitly stated, or is unclear, use "unknown" (never null).
 - NEVER infer job_type from a designation, seniority level, pay grade, job title, or work mode/location arrangement. Words such as "Consultant", "Lead", "Senior", "Analyst", "Manager", "Individual Contributor", "Associate", "Director" are role/designation classifications, NOT employment types; words such as "Remote", "Hybrid", "Onsite", "Work From Home" describe WHERE you work, NOT how you're employed. If the job description does not explicitly state an employment type (for example "Full time", "Permanent", "Contract", "Contractual", "Part time", "Internship"), return "job_type": "unknown" — even when such a designation appears prominently in the text, and equally when a work-mode word appears prominently instead. For example: a job titled "Data Scientist" -> "job_type": "unknown" is CORRECT; "job_type": "Data Scientist" is WRONG (that is the title, not an employment type). A job titled "Senior Data Scientist" -> "job_type": "unknown" is CORRECT; "job_type": "Senior Data Scientist" is WRONG. A role called "Consultant" -> "job_type": "unknown" is CORRECT; "job_type": "Consultant" is WRONG — "Consultant" is a designation, never an employment type.
 - Never invent a skill, number, or requirement that is not present in the text.
+- contact_email and email_application_signal reflect ONLY what the text explicitly states about an email address. Set "email_application_signal": "apply_via_email" ONLY when the text explicitly instructs sending a resume/application by email (e.g. "email your resume to...", "apply by sending your CV to...", "interested candidates may email their application to..."). If an email address appears only for general queries/contact ("for more information, contact...", "questions: ..."), use "contact_only". If no email address appears anywhere in the text, contact_email MUST be null and email_application_signal MUST be "none". Never guess, invent, or construct an email address from a company name, domain, or any other inference — only report one if it is literally written in the text.
 """
 
 
@@ -746,6 +816,7 @@ class JobParser:
         # validation. Leaves the raw response untouched; unmapped values
         # still fail model_validate below.
         normalizations = _normalize_job_type_in_payload(data)
+        normalizations += _normalize_contact_email_in_payload(data)
         for note in normalizations:
             logger.info("JobParser normalized %s for job %s", note, job.url)
 

@@ -331,6 +331,34 @@ def apply_(job: str, reuse_session: bool) -> None:
         sys.exit(1)
 
 
+@cli.command("email-outreach")
+@click.argument("job")
+def email_outreach(job: str) -> None:
+    """
+    Phase 15: draft and, with your approval, send an email for JOB
+    (id / external id / URL) -- an application-by-email if its JD
+    explicitly asked for one, or a cold-outreach note (NOT an
+    application) if it merely mentions a contact email. The mode is
+    resolved automatically from the job's own extraction, never chosen
+    here. Gated by BOTH AUTO_EMAIL_OUTREACH=true AND DRY_RUN=false —
+    neither alone is enough — on top of this command's own interactive
+    review and final y/n confirm. Always interactive; never reachable
+    from run-daily/discover/scheduler.
+    """
+    settings = get_settings()
+    if not (settings.auto_email_outreach and not settings.dry_run):
+        raise click.ClickException(
+            "`email-outreach` is disabled. Set AUTO_EMAIL_OUTREACH=true and DRY_RUN=false "
+            "to enable it (both are required, on top of this command's own human approval)."
+        )
+    from naukri_agent.orchestration.email_outreach_runner import run_email_outreach_workflow
+
+    result = run_email_outreach_workflow(settings, job)
+    click.echo(json.dumps(result.model_dump(), indent=2, default=str))
+    if not result.sent:
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Scope change: daily read-only match digest + manual application history.
 # ---------------------------------------------------------------------------
