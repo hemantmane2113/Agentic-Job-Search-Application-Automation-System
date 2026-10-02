@@ -12,8 +12,11 @@ from typing import Any
 from naukri_agent.browser import jobs as _jobs
 from naukri_agent.browser import login as _login
 from naukri_agent.browser import profile as _profile
+from naukri_agent.browser.client_interface import JobBoardClient
 from naukri_agent.browser.models import (
     ApplicationWorkflowInspection,
+    ApplyQuestionPrompt,
+    ApplySubmissionResult,
     ApplyUiInspection,
     JobDetail,
     JobListingSummary,
@@ -23,10 +26,10 @@ from naukri_agent.browser.models import (
 from naukri_agent.config import Settings
 
 
-class NaukriClient:
+class NaukriClient(JobBoardClient):
     def __init__(self, page: Any, settings: Settings) -> None:
-        self._page = page
-        self._settings = settings
+        super().__init__(page, settings)
+        self._apply_session: Any = None
 
     def login(self) -> LoginResult:
         return _login.login(self._page, self._settings)
@@ -70,11 +73,40 @@ class NaukriClient:
 
     def prepare_application(self, *args: Any, **kwargs: Any) -> Any:
         """
-        Stage 2 (write operations). Deliberately not implemented until
-        Stage 1's read-only inspection has been reviewed and approved
-        — see the Phase 7 plan.
+        Historical Stage 2 sentinel, predating the Phase 14 apply agent
+        below. Deliberately left as a permanent NotImplementedError —
+        not part of JobBoardClient's interface, Naukri-specific legacy
+        naming only.
         """
         raise NotImplementedError(
             "prepare_application is Stage 2 (write operations) — not "
             "implemented until Stage 1 is reviewed and explicitly approved."
         )
+
+    # --- Phase 14: apply-write surface ---
+    # Delegates to browser/apply_workflow.py. Imported lazily (same
+    # pattern as extract_application_ui() above) since apply_workflow
+    # imports from apply_inspection, which imports NaukriClient — a
+    # module-level import here would be circular.
+
+    def _get_apply_session(self) -> Any:
+        if self._apply_session is None:
+            from naukri_agent.browser.apply_workflow import ApplyWorkflowSession
+
+            self._apply_session = ApplyWorkflowSession(self._page)
+        return self._apply_session
+
+    def click_apply(self) -> None:
+        self._get_apply_session().click_apply()
+
+    def list_questions(self) -> list[ApplyQuestionPrompt]:
+        return self._get_apply_session().list_questions()
+
+    def submit_answer(self, control_id: str, answer: str) -> None:
+        self._get_apply_session().submit_answer(control_id, answer)
+
+    def skip_question(self, control_id: str) -> None:
+        self._get_apply_session().skip_question(control_id)
+
+    def submit_application(self) -> ApplySubmissionResult:
+        return self._get_apply_session().submit_application()

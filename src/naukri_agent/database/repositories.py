@@ -17,6 +17,7 @@ from naukri_agent.candidate.models import CandidateProfile
 from naukri_agent.database.models import (
     ApplicationEvent,
     ApplicationHistory,
+    ApplicationQuestion,
     ApplicationStatus,
     Candidate,
     Job,
@@ -686,6 +687,82 @@ def record_job_recommendation(
     session.add(row)
     session.flush()
     return row
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: apply-agent question audit log. Purely additive; never
+# consulted by scoring/matching/recommendation logic.
+# ---------------------------------------------------------------------------
+
+
+def add_application_question(
+    session: Session,
+    *,
+    job_id: int,
+    attempt_id: str,
+    order_in_attempt: int,
+    question_text: str,
+    was_skipped: bool = False,
+    drafted_answer: str | None = None,
+    final_answer: str | None = None,
+    human_edited: bool = False,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    application_id: int | None = None,
+) -> ApplicationQuestion:
+    """
+    Record one question asked during an apply attempt. Called once per
+    question, immediately as it's drafted/skipped — not deferred to one
+    final commit — so an aborted attempt still leaves a durable partial
+    audit trail. job_id should be the CANONICAL job id.
+    """
+    row = ApplicationQuestion(
+        job_id=job_id,
+        application_id=application_id,
+        attempt_id=attempt_id,
+        order_in_attempt=order_in_attempt,
+        question_text=question_text,
+        was_skipped=was_skipped,
+        drafted_answer=drafted_answer,
+        final_answer=final_answer,
+        human_edited=human_edited,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def link_application_questions_to_history(
+    session: Session, attempt_id: str, application_id: int
+) -> int:
+    """
+    Bulk-backfill application_id onto every ApplicationQuestion row for
+    one attempt_id. Called once, right after a successful
+    upsert_application_history() for an agent_auto_apply submission.
+    Returns the row count updated.
+    """
+    result = (
+        session.query(ApplicationQuestion)
+        .filter_by(attempt_id=attempt_id)
+        .update({"application_id": application_id})
+    )
+    session.flush()
+    return result
+
+
+def list_application_questions(
+    session: Session, *, job_id: int | None = None, attempt_id: str | None = None
+) -> list[ApplicationQuestion]:
+    """Read helper for audit/debugging/tests only — never consulted by
+    scoring or recommendation logic."""
+    q = session.query(ApplicationQuestion)
+    if job_id is not None:
+        q = q.filter_by(job_id=job_id)
+    if attempt_id is not None:
+        q = q.filter_by(attempt_id=attempt_id)
+    return q.order_by(ApplicationQuestion.order_in_attempt.asc()).all()
 
 
 def add_run_event(

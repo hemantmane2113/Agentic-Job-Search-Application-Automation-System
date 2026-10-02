@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     timezone: str = "Asia/Kolkata"
     dry_run: bool = True
+    # Phase 14: one of two independent gates `apply` requires (the other
+    # is dry_run=False) before it will even start — see cli/main.py's
+    # `apply` command. Defaults false so nothing changes for anyone not
+    # explicitly opting in.
     auto_apply: bool = False
 
     # --- Database ---
@@ -112,6 +116,15 @@ class Settings(BaseSettings):
     # generate content). Falls back to LLM_PROVIDER/LLM_MODEL if unset.
     resume_llm_provider: LLMProviderName | None = None
     resume_llm_model: str | None = None
+
+    # --- Apply-answer drafting LLM override (Phase 14) ---
+    # Optional: used only to draft a screening-question answer for the
+    # human to approve/edit (agents/apply_answer_agent.py) — grounded
+    # strictly in CandidateProfile/MasterResume facts. Falls back to
+    # LLM_PROVIDER/LLM_MODEL if unset, same shape as resume_llm_provider
+    # above.
+    apply_llm_provider: LLMProviderName | None = None
+    apply_llm_model: str | None = None
 
 
 

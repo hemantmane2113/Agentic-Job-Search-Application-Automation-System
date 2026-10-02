@@ -229,6 +229,39 @@ KEY_SKILLS_CHIP = "a[class*='chip']"  # UNVERIFIED — scoped within KEY_SKILLS_
 # the two selectors immediately above, though still UNVERIFIED live.
 KEY_SKILLS_PREFERRED_ICON = "i.ni-icon-jd-save"  # UNVERIFIED (evidenced, not hashed)
 
+# --- Phase 14: apply-write controls (post-Apply chatbot questionnaire) ---
+# ALL UNVERIFIED. No live run has ever observed the chatbot UI render
+# anything (every inspect-apply capture found #chatbot-container empty
+# even after the allowed apply-init response came back) — these are
+# best-effort placeholders for the per-answer/skip/submit controls IF
+# and when a DOM-based interaction surface is confirmed to exist. A
+# real run (reusing inspect-apply, with a human manually answering a
+# question and submitting) must happen before these can be trusted; see
+# CLAUDE.md's Phase 14 open-risk notes. Treat exactly like every other
+# UNVERIFIED entry in this file until confirmed.
+APPLY_ANSWER_INPUT = "textarea[class*='chatbot'], input[class*='answer']"  # UNVERIFIED
+APPLY_SKIP_BUTTON = "button[class*='skip']"  # UNVERIFIED
+APPLY_NEXT_BUTTON = "button[class*='next'], button[class*='continue']"  # UNVERIFIED
+APPLY_FINAL_SUBMIT_BUTTON = "button[class*='submit']"  # UNVERIFIED
+
+# --- Profile EDIT page (prerequisite inspection for a future "touch to
+# refresh last-updated" resume/profile feature) -----------------------
+# Completely UNKNOWN DOM today — browser/profile.py only reads the
+# resume SECTION of the read-only profile view, never an edit surface.
+# ALL of the below are UNVERIFIED guesses pending a real
+# `inspect-profile-edit` run; treat exactly like every other UNVERIFIED
+# entry in this file until confirmed.
+PROFILE_EDIT_URL = "https://www.naukri.com/mnjuser/profile"  # UNVERIFIED — may need a different edit-mode URL/deep link
+PROFILE_EDIT_SECTION_ROOT_CANDIDATES = (
+    "[class*='edit']",
+    "form",
+    "[role='dialog']",
+)  # UNVERIFIED
+# Plain-text (NOT CSS) hints, used only to CLASSIFY a found control as a
+# likely save/update button for the design report — never clicked by
+# this tool (inspect-profile-edit is strictly read-only).
+PROFILE_EDIT_SAVE_BUTTON_HINTS = ("save", "update")  # UNVERIFIED
+
 # --- Authentication state (any authenticated page) ---
 # VERIFIED 2026-09-08 against real captures of the post-login,
 # profile, and search-results pages (all three showed this element).

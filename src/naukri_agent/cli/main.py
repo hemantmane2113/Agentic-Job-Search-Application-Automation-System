@@ -262,6 +262,31 @@ def inspect_apply(job_url: str, reuse_session: bool) -> None:
         sys.exit(1)
 
 
+@cli.command("inspect-profile-edit")
+@click.option(
+    "--reuse-session", is_flag=True, default=False,
+    help="Reuse the persistent browser profile instead of an isolated, disposable one.",
+)
+def inspect_profile_edit(reuse_session: bool) -> None:
+    """
+    READ-ONLY inspection of Naukri's profile-EDIT page DOM (currently
+    completely unknown to this codebase). No save/submit, no upload, no
+    field edits — same safety posture as `inspect`/`inspect-apply`. This
+    is a PREREQUISITE for, not an implementation of, the future daily
+    resume/profile "touch to refresh last-updated" action, which remains
+    unbuilt and blocked on a human reviewing this output. Requires
+    NAUKRI_EMAIL/NAUKRI_PASSWORD and real network access — run locally,
+    against your own account.
+    """
+    settings = get_settings()
+    from naukri_agent.browser.profile_inspection import run_profile_edit_inspection
+
+    report = run_profile_edit_inspection(settings, isolated_profile=not reuse_session)
+    click.echo(json.dumps(report, indent=2))
+    if not report.get("completed"):
+        sys.exit(1)
+
+
 @cli.command("match")
 def match() -> None:
     """Run job matching only (Phase 4)."""
@@ -278,12 +303,32 @@ def prepare() -> None:
 
 
 @cli.command("apply")
-def apply_() -> None:
-    """REMOVED FROM SCOPE — applications are performed manually."""
-    raise NotImplementedError(
-        "Application submission is out of scope. Applications are manual; use "
-        "`mark-applied` to record one."
-    )
+@click.argument("job")
+@click.option(
+    "--reuse-session", is_flag=True, default=False,
+    help="Reuse the persistent browser profile instead of an isolated, disposable one.",
+)
+def apply_(job: str, reuse_session: bool) -> None:
+    """
+    Phase 14: open Naukri's real Apply flow for JOB (id / external id /
+    URL) and, with your approval of every drafted answer and the final
+    submission, apply. Gated by BOTH AUTO_APPLY=true AND DRY_RUN=false —
+    neither alone is enough — on top of this command's own interactive
+    batch-answer review and final y/n confirm. Always interactive; never
+    reachable from run-daily/discover/scheduler.
+    """
+    settings = get_settings()
+    if not (settings.auto_apply and not settings.dry_run):
+        raise click.ClickException(
+            "`apply` is disabled. Set AUTO_APPLY=true and DRY_RUN=false to enable it "
+            "(both are required, on top of this command's own per-step human approval)."
+        )
+    from naukri_agent.orchestration.apply_runner import run_apply_workflow
+
+    result = run_apply_workflow(settings, job, isolated_profile=not reuse_session)
+    click.echo(json.dumps(result.model_dump(), indent=2, default=str))
+    if not result.submitted:
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

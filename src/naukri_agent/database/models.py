@@ -564,6 +564,52 @@ class JobRecommendation(Base):
         )
 
 
+class ApplicationQuestion(Base):
+    """
+    Audit log of one screening question asked during a Phase 14 apply
+    attempt — never consulted by scoring/matching/recommendation logic,
+    same framing as JobRecommendation/RunEvent. `job_id` is the
+    CANONICAL job id, same convention as ApplicationHistory.
+
+    `attempt_id` (a uuid4 hex, one per `apply` invocation) groups every
+    question asked during one run — a job can be attempted more than
+    once (aborted, retried), so this is NOT unique per job_id.
+    `application_id` starts NULL (a question can be asked before any
+    ApplicationHistory row exists, e.g. the human aborts at the final
+    confirm) and is backfilled only once that attempt's submission is
+    confirmed — see database.repositories.link_application_questions_to_history.
+    Rows already written are NEVER deleted on an abort; the audit trail
+    of what was asked/drafted/answered stays intact either way.
+    """
+
+    __tablename__ = "application_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    application_id: Mapped[int | None] = mapped_column(
+        ForeignKey("application_history.id"), nullable=True, index=True
+    )
+    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    order_in_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    was_skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    drafted_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    human_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    asked_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug convenience
+        return (
+            f"<ApplicationQuestion id={self.id} job_id={self.job_id} "
+            f"attempt_id={self.attempt_id!r} skipped={self.was_skipped}>"
+        )
+
+
 class RunEvent(Base):
     """Per-stage audit record for one DailyRun. `detail` is SHORT and
     non-sensitive (counts, error class + short message, query name) —

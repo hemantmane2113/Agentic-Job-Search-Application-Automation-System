@@ -368,3 +368,72 @@ class ApplyUiInspection(BaseModel):
     frames: list[FrameInfo] = Field(default_factory=list)
     dialogs: list[DialogInfo] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: apply-write result types (browser/apply_workflow.py).
+#
+# Unlike Stage 1.5's ApplyUiInspection (observation only, never
+# persisted content), these carry the real question text and submission
+# outcome needed to actually drive and record a live application —
+# this module is not subject to apply_inspection.py's sanitization
+# design, since it is a live interactive flow a human directly
+# supervises, not a logged, unattended inspection artifact.
+# ---------------------------------------------------------------------------
+
+
+class ApplyQuestionPrompt(BaseModel):
+    """One question from the live application's questionnaire."""
+
+    control_id: str | None = None
+    question_text: str
+    # Best-effort — the real skippable/mandatory signal has never been
+    # observed in a live run; see CLAUDE.md's open-risk notes. Treat as
+    # provisional until confirmed against a real apply-init response.
+    skippable: bool = False
+
+
+class ApplySubmissionResult(BaseModel):
+    """Outcome of the final, irreversible submit click."""
+
+    submitted: bool
+    confirmation_text: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Profile-edit inspection (prerequisite for a future resume/profile
+# "touch to refresh last-updated" feature — read-only only; see
+# browser/profile_inspection.py). Naukri's profile-EDIT page DOM has
+# never been inspected by this codebase; browser/profile.py only ever
+# reads the resume SECTION of the read-only profile view.
+# ---------------------------------------------------------------------------
+
+
+class ProfileEditControl(BaseModel):
+    """One input/select/textarea/button found on the profile-edit
+    surface. Recorded for design analysis only — never operated."""
+
+    tag: str
+    type: str | None = None
+    element_id: str | None = None
+    name: str | None = None
+    placeholder: str | None = None
+    aria_label: str | None = None
+    label_text: str | None = None
+    disabled: bool = False
+
+
+class ProfileEditInspection(BaseModel):
+    """
+    Structured, read-only capture of whatever Naukri's profile-edit
+    surface turns out to be. Absence of a field means "not observed in
+    this capture", never "confirmed not to exist" — same caveat as
+    ResumeState/ApplyUiInspection.
+    """
+
+    page_url: str | None = None
+    section_roots_found: list[str] = Field(default_factory=list)
+    controls: list[ProfileEditControl] = Field(default_factory=list)
+    save_control_candidates: list[ProfileEditControl] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
