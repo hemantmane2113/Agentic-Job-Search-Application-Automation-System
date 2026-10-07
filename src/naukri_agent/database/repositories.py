@@ -217,7 +217,11 @@ def _repair_stale_repost_links(session: Session, job: Job) -> list[int]:
 
 
 def add_job_extraction(
-    session: Session, job_id: int, extraction: JobExtractionCreate
+    session: Session,
+    job_id: int,
+    extraction: JobExtractionCreate,
+    *,
+    source_content_fingerprint: str | None = None,
 ) -> JobExtraction:
     """
     Persist a new structured extraction for a job WITHOUT touching the
@@ -226,6 +230,10 @@ def add_job_extraction(
     overwritten) but marked is_current=False, so the full chain stays
     auditable: Job.description (raw) -> JobExtraction.raw_llm_response
     (verbatim LLM output) -> JobExtraction's typed columns (parsed).
+
+    `source_content_fingerprint` should be the Job's content_fingerprint
+    AT THE TIME this extraction was produced — the daily pipeline uses
+    it to detect an unchanged JD and skip re-parsing with the LLM.
     """
     previous_count = session.query(JobExtraction).filter_by(job_id=job_id).count()
     session.query(JobExtraction).filter_by(job_id=job_id, is_current=True).update(
@@ -251,6 +259,7 @@ def add_job_extraction(
         contact_email=extraction.contact_email,
         email_application_signal=extraction.email_application_signal,
         raw_llm_response=extraction.raw_llm_response,
+        source_content_fingerprint=source_content_fingerprint,
     )
     session.add(row)
     session.flush()

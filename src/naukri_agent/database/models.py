@@ -211,6 +211,13 @@ class JobExtraction(Base):
     # auditable rather than a black box.
     raw_llm_response: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Job.content_fingerprint at the moment this extraction was produced.
+    # Lets the daily pipeline skip re-sending an unchanged JD to the LLM
+    # (see orchestration/pipeline.py) -- NULL on any row written before
+    # this column existed, which safely falls back to "always re-parse"
+    # rather than ever skipping on an unknown basis.
+    source_content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     job: Mapped["Job"] = relationship(back_populates="extractions")
 
     def __repr__(self) -> str:  # pragma: no cover - debug convenience

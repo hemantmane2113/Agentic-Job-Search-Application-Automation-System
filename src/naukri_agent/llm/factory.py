@@ -71,8 +71,9 @@ def get_resume_llm_provider(settings: Settings) -> LLMProvider:
 def get_apply_llm_provider(settings: Settings) -> LLMProvider:
     """
     Build the provider used for apply-answer drafting
-    (agents/apply_answer_agent.py's draft_application_answer) — drafts
-    only, never the final content; a human approves/edits every answer
+    (agents/apply_answer_agent.py's draft_application_answers, one
+    batched call per application) — drafts only, never the final
+    content; a human approves/edits every answer
     before it's ever typed into a real application. Falls back to the
     default LLM_PROVIDER/LLM_MODEL when APPLY_LLM_PROVIDER/APPLY_LLM_MODEL
     aren't set, same shape as get_resume_llm_provider above.

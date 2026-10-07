@@ -497,18 +497,26 @@ def test_e2e_derived_rows_correspond_to_the_exact_extraction_id(tmp_path):
 
 
 def test_e2e_two_extraction_versions_have_separate_immutable_evidence(tmp_path):
+    """Two DISTINCT extraction versions, produced by a genuine JD content
+    change between runs (a repost with updated requirements) -- not by
+    re-running the same unchanged text, which orchestration/pipeline.py
+    now deliberately short-circuits (reuses the cached extraction, no
+    LLM call) rather than re-parsing for no new information. The
+    description is only ever appended to, never altered, so every
+    existing ld_json/DOM/deterministic-vocabulary assertion below still
+    holds for both versions."""
     _prep_with_skills(tmp_path, CANDIDATE_SKILLS)
     cfg = settings(tmp_path, threshold_review=0, threshold_accept=100)
     factory = in_memory_factory()
 
-    spec = dict(_GENERAC_SPEC)
-    discover = _fake_discover_with_raw_evidence([spec])
+    spec_v1 = dict(_GENERAC_SPEC)
+    discover_v1 = _fake_discover_with_raw_evidence([spec_v1])
 
     # version 1: LLM returns a NARROWER required list
     llm_v1 = _PerJobLLM({GENERAC_DESCRIPTION[:40]: _extraction_json(["SQL", "Python"], [])})
     run_daily_recommendations(
         cfg, now=datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
-        discover_fn=discover, extraction_provider=llm_v1, session_factory=factory,
+        discover_fn=discover_v1, extraction_provider=llm_v1, session_factory=factory,
     )
     with session_scope(factory) as s:
         job = s.query(Job).one()
@@ -519,18 +527,22 @@ def test_e2e_two_extraction_versions_have_separate_immutable_evidence(tmp_path):
             s.query(JobExtractionSkillEvidence).filter_by(job_extraction_id=v1_id).all()
         }
 
-    # version 2: LLM returns a WIDER required list (re-extraction).
+    # version 2: the JD was reposted with updated requirements (a real
+    # content change -> content_fingerprint changes -> a real re-parse,
+    # not a cache reuse), and the LLM returns a WIDER required list.
     # "Kubernetes" is deliberately NOT a candidate skill and has no ld_
     # json/DOM evidence either -- it can ONLY appear via the LLM, so its
     # presence in v2-but-not-v1 unambiguously reflects the different
     # extraction, not deterministic vocabulary recovery (which found
     # "R" independently in BOTH versions regardless of the LLM's list).
+    spec_v2 = dict(_GENERAC_SPEC, description=GENERAC_DESCRIPTION + "\n\nRe-posted with updated requirements.")
+    discover_v2 = _fake_discover_with_raw_evidence([spec_v2])
     llm_v2 = _PerJobLLM({
         GENERAC_DESCRIPTION[:40]: _extraction_json(["SQL", "Python", "Kubernetes"], [])
     })
     run_daily_recommendations(
         cfg, now=datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC),
-        discover_fn=discover, extraction_provider=llm_v2, session_factory=factory,
+        discover_fn=discover_v2, extraction_provider=llm_v2, session_factory=factory,
     )
     with session_scope(factory) as s:
         job = s.query(Job).one()

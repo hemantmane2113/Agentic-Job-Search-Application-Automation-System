@@ -107,8 +107,10 @@ class _PerJobLLM:
     def __init__(self, mapping: dict[str, str], default: str = "{}") -> None:
         self._mapping = mapping
         self._default = default
+        self.calls = 0
 
     def complete(self, system: str, prompt: str, *, json_mode: bool = False) -> str:
+        self.calls += 1
         for key, resp in self._mapping.items():
             if key in prompt:
                 return resp
@@ -509,3 +511,84 @@ def test_parse_failed_set_is_scoped_to_the_current_run(tmp_path):
         recs = s.query(JobRecommendation).filter_by(daily_run_id=run2.id).all()
         flaky = s.query(Job).filter(Job.url.like("%-flaky-%")).one()
         assert [r.job_id for r in recs] == [flaky.id]
+
+
+def test_unchanged_job_reuses_cached_extraction_changed_job_triggers_reparse(tmp_path):
+    """Efficiency guard: a job that reappears in search results with
+    IDENTICAL JD text must not be re-sent to the LLM on the next run --
+    the daily pipeline should reuse its current JobExtraction (recorded
+    via a 'reused_cached_extraction' parse RunEvent). Only a genuine
+    content change (a new content_fingerprint) should trigger a real
+    re-parse and a new JobExtraction version."""
+    from naukri_agent.database.models import JobExtraction
+
+    _prep(tmp_path)
+    cfg = settings(tmp_path, threshold_review=0, threshold_accept=100)
+    factory = in_memory_factory()
+    url = "https://www.naukri.com/job-listings-reparse-040926000500"
+
+    def make_discover(description):
+        def discover_fn(session, profile, settings, run_id, seq):
+            job, _ = upsert_job(
+                session,
+                JobCreate(
+                    title="Reparse role", company="Acme", location="Pune",
+                    description=description, url=url, experience_text=None,
+                ),
+                run_id=run_id,
+            )
+            return (
+                DiscoveryResult(
+                    queries_run=1, queries_failed=0, jobs_new=1, jobs_reseen=0,
+                    details_failed=0, job_ids=[job.id], total_failure=False,
+                ),
+                seq + 1,
+            )
+
+        return discover_fn
+
+    llm = _PerJobLLM({}, _VALID_EXTRACTION)
+
+    run_daily_recommendations(
+        cfg, now=datetime.datetime(2026, 9, 20, tzinfo=datetime.UTC),
+        discover_fn=make_discover("Original JD text."),
+        extraction_provider=llm, session_factory=factory,
+    )
+    assert llm.calls == 1
+
+    run_daily_recommendations(
+        cfg, now=datetime.datetime(2026, 9, 21, tzinfo=datetime.UTC),
+        discover_fn=make_discover("Original JD text."),  # unchanged content
+        extraction_provider=llm, session_factory=factory,
+    )
+    assert llm.calls == 1  # reused the cached extraction -- no new LLM call
+
+    with session_scope(factory) as s:
+        from naukri_agent.database.models import Job
+
+        job = s.query(Job).filter_by(url=url).one()
+        run2 = s.query(DailyRun).order_by(DailyRun.id.desc()).first()
+        parse_event = (
+            s.query(RunEvent).filter_by(daily_run_id=run2.id, stage="parse", job_id=job.id).one()
+        )
+        assert parse_event.detail["reused_cached_extraction"] is True
+        assert s.query(JobExtraction).filter_by(job_id=job.id).count() == 1  # no new version
+
+    run_daily_recommendations(
+        cfg, now=datetime.datetime(2026, 9, 22, tzinfo=datetime.UTC),
+        discover_fn=make_discover("Completely different JD text now."),  # changed content
+        extraction_provider=llm, session_factory=factory,
+    )
+    assert llm.calls == 2  # a genuine content change triggers a real re-parse
+
+    with session_scope(factory) as s:
+        from naukri_agent.database.models import Job
+
+        job = s.query(Job).filter_by(url=url).one()
+        versions = (
+            s.query(JobExtraction).filter_by(job_id=job.id)
+            .order_by(JobExtraction.extraction_version).all()
+        )
+        assert len(versions) == 2  # exactly one new version, not a third unchanged reuse
+        assert versions[-1].is_current is True
+        assert versions[-1].source_content_fingerprint == job.content_fingerprint

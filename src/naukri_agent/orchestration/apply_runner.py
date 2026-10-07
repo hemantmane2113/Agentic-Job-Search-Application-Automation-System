@@ -148,7 +148,7 @@ def run_apply_workflow(
     # Imported lazily so importing this module (e.g. for the structural
     # guard test) never requires Playwright/a real DB — same pattern
     # BrowserManager.launch() and inspection.py already use.
-    from naukri_agent.agents.apply_answer_agent import draft_application_answer
+    from naukri_agent.agents.apply_answer_agent import draft_application_answers
     from naukri_agent.browser.browser_manager import BrowserManager
     from naukri_agent.browser.naukri_client import NaukriClient
     from naukri_agent.candidate.models import load_candidate_profile
@@ -191,9 +191,9 @@ def run_apply_workflow(
         profile_dir = settings.inspection_output_dir / "_apply_session_profiles" / stamp
 
     skipped_count = 0
-    # (order_in_attempt, question, drafted_answer) for every mandatory
-    # question, so order numbering survives the batch-review pass.
-    pending_drafts: list[tuple[int, ApplyQuestionPrompt, str | None]] = []
+    # (order_in_attempt, question) for every mandatory question, so order
+    # numbering survives the batch-review pass.
+    mandatory: list[tuple[int, ApplyQuestionPrompt]] = []
     order = 0
 
     with BrowserManager(settings, profile_dir_override=profile_dir) as browser:
@@ -214,11 +214,20 @@ def run_apply_workflow(
                         was_skipped=True,
                     )
                 continue
+            mandatory.append((order, question))
 
-            draft = draft_application_answer(
-                provider, question.question_text, candidate, resume, job_title, company
-            )
-            pending_drafts.append((order, question, draft.answer if draft else None))
+        # One batched LLM call for every mandatory question in this
+        # application, instead of one call per question — the candidate/
+        # resume grounding facts are identical across all of them, so
+        # resending that context per question would be pure waste.
+        drafts = draft_application_answers(
+            provider, [q.question_text for _order, q in mandatory],
+            candidate, resume, job_title, company,
+        )
+        pending_drafts: list[tuple[int, ApplyQuestionPrompt, str | None]] = [
+            (order_in_attempt, q, draft.answer if draft else None)
+            for (order_in_attempt, q), draft in zip(mandatory, drafts)
+        ]
 
         review_input = [(q, drafted) for _order, q, drafted in pending_drafts]
         final_answers = interaction.confirm_answers(review_input)

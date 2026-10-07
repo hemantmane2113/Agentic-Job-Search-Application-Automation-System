@@ -121,3 +121,23 @@ def test_add_job_extraction_persists_new_columns_and_still_versions():
         current2 = current_job_extraction(s, job.id)
         assert current2.extraction_version == 2
         assert current2.contact_email is None
+
+
+def test_add_job_extraction_persists_source_content_fingerprint():
+    """orchestration/pipeline.py relies on this to skip re-parsing an
+    unchanged job -- the fingerprint must round-trip exactly, and stay
+    None when the caller doesn't pass one (e.g. jobs/parser.py's own
+    parse_job_and_store, which predates this efficiency feature)."""
+    with session_scope(in_memory_factory()) as s:
+        job = add_job(s, slug="x", ext="040926000305")
+        provider = FakeProvider(model="m", response=_response())
+        result = JobParser(provider).parse(
+            Job(url=job.url, title=job.title, company=job.company, location=job.location,
+                description=job.description, content_fingerprint="fp")
+        )
+
+        row = add_job_extraction(s, job.id, result.extraction, source_content_fingerprint="cfp-123")
+        assert row.source_content_fingerprint == "cfp-123"
+
+        row_default = add_job_extraction(s, job.id, result.extraction)
+        assert row_default.source_content_fingerprint is None

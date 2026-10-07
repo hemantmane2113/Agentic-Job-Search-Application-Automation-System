@@ -181,65 +181,90 @@ def run_daily_recommendations(
                 continue
             extraction_row = None
             if extraction_provider is not None:
-                pr = JobParser(extraction_provider).parse(job)
-                norm_detail: dict = {}
-                if pr.normalizations:
-                    norm_detail["normalized"] = pr.normalizations
-                if pr.warnings:
-                    norm_detail["skill_warnings"] = pr.warnings
-                if pr.skill_cleanups:
-                    norm_detail["skill_cleanups"] = pr.skill_cleanups
-                if pr.success and pr.extraction is not None:
-                    from naukri_agent.database.repositories import add_job_extraction
+                # Efficiency: a job that keeps reappearing in search
+                # results (the common case -- most listings stay live for
+                # days/weeks) has IDENTICAL JD text run after run. Re-
+                # sending that same text to the LLM every day would burn
+                # tokens for extraction output that can't have changed.
+                # Reuse the current extraction, with no LLM call, when its
+                # source_content_fingerprint still matches this job's
+                # CURRENT content_fingerprint; a row written before this
+                # field existed is NULL here, which never matches and
+                # safely falls through to a real re-parse below.
+                from naukri_agent.database.repositories import current_job_extraction
 
-                    # Hybrid skill evidence (2026-09-11): merge the LLM's
-                    # required/preferred lists with this job's raw skill
-                    # evidence (ld_json/Key Skills DOM, persisted during
-                    # discovery -- see replace_raw_skill_evidence) and
-                    # deterministic candidate-vocabulary recovery against
-                    # the full JD body. required_skills/preferred_skills
-                    # keep their EXACT existing name/shape/semantics on
-                    # JobExtraction -- only the VALUE that goes into them
-                    # changes, from merged_required_preferred(). No
-                    # scraper-specific logic lives in matching/scorer.py;
-                    # this stays entirely in the extraction step.
-                    raw_skill_rows = (
-                        session.query(JobRawSkillEvidence).filter_by(job_id=job.id).all()
-                    )
-                    ld_json_skills = [
-                        r.skill_text for r in raw_skill_rows if r.source == "ld_json"
-                    ]
-                    key_skills_dom = [
-                        _RawKeySkillChip(r.skill_text, bool(r.preferred))
-                        for r in raw_skill_rows
-                        if r.source == "key_skills_dom"
-                    ]
-                    _raw_evidence, merged_evidence = build_skill_evidence(
-                        required_skills=pr.extraction.required_skills,
-                        preferred_skills=pr.extraction.preferred_skills,
-                        ld_json_skills=ld_json_skills,
-                        key_skills_dom=key_skills_dom,
-                        description=job.description,
-                        candidate_skills=profile.skills,
-                    )
-                    required_out, preferred_out = merged_required_preferred(merged_evidence)
-                    pr.extraction = pr.extraction.model_copy(
-                        update={"required_skills": required_out, "preferred_skills": preferred_out}
-                    )
+                cached = current_job_extraction(session, job.id)
+                reused_cached = cached is not None and cached.source_content_fingerprint == job.content_fingerprint
 
-                    extraction_row = add_job_extraction(session, job.id, pr.extraction)
-                    add_job_extraction_skill_evidence(session, extraction_row.id, merged_evidence)
+                if reused_cached:
+                    extraction_row = cached
                     seq += 1
                     add_run_event(session, daily_run_id=run_id, seq=seq, stage="parse",
                                   status=RunEventStatus.OK, job_id=job.id,
-                                  detail=norm_detail or None)
+                                  detail={"reused_cached_extraction": True, "extraction_id": cached.id})
                 else:
-                    parse_failures += 1
-                    parse_failed_ids.add(job.id)
-                    seq += 1
-                    add_run_event(session, daily_run_id=run_id, seq=seq, stage="parse",
-                                  status=RunEventStatus.FAILED, job_id=job.id,
-                                  detail={"error": (pr.error or "unknown")[:120], **norm_detail})
+                    pr = JobParser(extraction_provider).parse(job)
+                    norm_detail: dict = {}
+                    if pr.normalizations:
+                        norm_detail["normalized"] = pr.normalizations
+                    if pr.warnings:
+                        norm_detail["skill_warnings"] = pr.warnings
+                    if pr.skill_cleanups:
+                        norm_detail["skill_cleanups"] = pr.skill_cleanups
+                    if pr.success and pr.extraction is not None:
+                        from naukri_agent.database.repositories import add_job_extraction
+
+                        # Hybrid skill evidence (2026-09-11): merge the LLM's
+                        # required/preferred lists with this job's raw skill
+                        # evidence (ld_json/Key Skills DOM, persisted during
+                        # discovery -- see replace_raw_skill_evidence) and
+                        # deterministic candidate-vocabulary recovery against
+                        # the full JD body. required_skills/preferred_skills
+                        # keep their EXACT existing name/shape/semantics on
+                        # JobExtraction -- only the VALUE that goes into them
+                        # changes, from merged_required_preferred(). No
+                        # scraper-specific logic lives in matching/scorer.py;
+                        # this stays entirely in the extraction step.
+                        raw_skill_rows = (
+                            session.query(JobRawSkillEvidence).filter_by(job_id=job.id).all()
+                        )
+                        ld_json_skills = [
+                            r.skill_text for r in raw_skill_rows if r.source == "ld_json"
+                        ]
+                        key_skills_dom = [
+                            _RawKeySkillChip(r.skill_text, bool(r.preferred))
+                            for r in raw_skill_rows
+                            if r.source == "key_skills_dom"
+                        ]
+                        _raw_evidence, merged_evidence = build_skill_evidence(
+                            required_skills=pr.extraction.required_skills,
+                            preferred_skills=pr.extraction.preferred_skills,
+                            ld_json_skills=ld_json_skills,
+                            key_skills_dom=key_skills_dom,
+                            description=job.description,
+                            candidate_skills=profile.skills,
+                        )
+                        required_out, preferred_out = merged_required_preferred(merged_evidence)
+                        pr.extraction = pr.extraction.model_copy(
+                            update={"required_skills": required_out, "preferred_skills": preferred_out}
+                        )
+
+                        extraction_row = add_job_extraction(
+                            session, job.id, pr.extraction,
+                            source_content_fingerprint=job.content_fingerprint,
+                        )
+                        add_job_extraction_skill_evidence(session, extraction_row.id, merged_evidence)
+                        seq += 1
+                        add_run_event(session, daily_run_id=run_id, seq=seq, stage="parse",
+                                      status=RunEventStatus.OK, job_id=job.id,
+                                      detail=norm_detail or None)
+                    else:
+                        parse_failures += 1
+                        parse_failed_ids.add(job.id)
+                        seq += 1
+                        add_run_event(session, daily_run_id=run_id, seq=seq, stage="parse",
+                                      status=RunEventStatus.FAILED, job_id=job.id,
+                                      detail={"error": (pr.error or "unknown")[:120], **norm_detail})
             result = score_job(job, extraction_row, profile, resume, settings)
             upsert_job_match(
                 session, candidate.id, job.id, result,

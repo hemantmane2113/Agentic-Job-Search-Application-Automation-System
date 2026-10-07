@@ -113,15 +113,17 @@ def _patch_common(monkeypatch, tmp_path, *, fake_client, drafted_answer="30 days
 
     if drafted_answer is None:
         monkeypatch.setattr(
-            "naukri_agent.agents.apply_answer_agent.draft_application_answer",
-            lambda *a, **k: None,
+            "naukri_agent.agents.apply_answer_agent.draft_application_answers",
+            lambda provider, question_texts, *a, **k: [None] * len(question_texts),
         )
     else:
         from naukri_agent.agents.apply_answer_agent import ApplyAnswerDraft
 
         monkeypatch.setattr(
-            "naukri_agent.agents.apply_answer_agent.draft_application_answer",
-            lambda *a, **k: ApplyAnswerDraft(answer=drafted_answer, reason="r"),
+            "naukri_agent.agents.apply_answer_agent.draft_application_answers",
+            lambda provider, question_texts, *a, **k: [
+                ApplyAnswerDraft(answer=drafted_answer, reason="r") for _ in question_texts
+            ],
         )
 
     return settings
@@ -210,6 +212,46 @@ def test_accepting_draft_as_is_does_not_flag_human_edited(tmp_path, monkeypatch)
     with session_scope(factory) as s:
         rows = list_application_questions(s, job_id=job_id)
         assert rows[0].human_edited is False
+
+
+def test_multiple_mandatory_questions_draft_in_a_single_batched_llm_call(tmp_path, monkeypatch):
+    """Efficiency guard: N mandatory questions must cost exactly ONE call
+    to draft_application_answers, not N separate calls each resending
+    the same candidate/resume grounding facts."""
+    fake_client = FakeApplyClient(
+        None, None,
+        questions=[
+            ApplyQuestionPrompt(control_id="q1", question_text="Notice period?"),
+            ApplyQuestionPrompt(control_id="q2", question_text="Expected salary?"),
+            ApplyQuestionPrompt(control_id="q3", question_text="Relocate?", skippable=True),
+        ],
+        submit_result=ApplySubmissionResult(submitted=True),
+    )
+    settings = _patch_common(monkeypatch, tmp_path, fake_client=fake_client)
+    factory, job_id = _make_job(settings, "x", "040926000206")
+
+    calls = []
+
+    def _fake_batch(provider, question_texts, *a, **k):
+        calls.append(list(question_texts))
+        from naukri_agent.agents.apply_answer_agent import ApplyAnswerDraft
+
+        return [ApplyAnswerDraft(answer=f"answer for {q}", reason="r") for q in question_texts]
+
+    monkeypatch.setattr(
+        "naukri_agent.agents.apply_answer_agent.draft_application_answers", _fake_batch
+    )
+
+    result = run_apply_workflow(settings, str(job_id), interaction=FakeInteraction())
+
+    assert result.questions_asked == 2
+    assert result.questions_skipped == 1
+    assert len(calls) == 1  # exactly one batched call
+    assert calls[0] == ["Notice period?", "Expected salary?"]  # skippable one excluded
+    assert fake_client.answered == [
+        ("q1", "answer for Notice period?"),
+        ("q2", "answer for Expected salary?"),
+    ]
 
 
 def test_declining_final_confirmation_submits_nothing_but_keeps_question_audit(tmp_path, monkeypatch):
