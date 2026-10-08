@@ -36,7 +36,7 @@ from naukri_agent.jobs.parser import JobParser
 from naukri_agent.jobs.skill_evidence import build_skill_evidence, merged_required_preferred
 from naukri_agent.matching.scorer import score_job
 from naukri_agent.orchestration.discovery import DiscoveryResult
-from naukri_agent.recommendations.builder import build_digest
+from naukri_agent.recommendations.builder import applied_via_agent_since, build_digest, previous_digest_time
 from naukri_agent.reporting.excel import export_workbook
 from naukri_agent.resume.models import load_master_resume
 from naukri_agent.resume.registry import load_resume_registry
@@ -296,6 +296,10 @@ def run_daily_recommendations(
             now=now,
             explain_provider=(explain_provider if settings.explanation_use_llm else None),
             parse_failed_job_ids=parse_failed_ids,
+            manual_apply_only=True,  # Part 1 = company-website jobs; Naukri-Apply jobs go via telegram-apply
+        )
+        digest.applied_via_agent = applied_via_agent_since(  # Part 2 = what the app applied to since the last digest
+            session, previous_digest_time(session, run_id, now)
         )
         digest.notes.extend(notes)
         seq += 1

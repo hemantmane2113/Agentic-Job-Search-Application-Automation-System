@@ -215,6 +215,7 @@ def build_digest(
     now: datetime.datetime | None = None,
     explain_provider: LLMProvider | None = None,
     parse_failed_job_ids: set[int] | None = None,
+    manual_apply_only: bool = False,
 ) -> RecommendationDigest:
     now = now or datetime.datetime.now(datetime.UTC)
     min_score = _min_score(settings)
@@ -252,6 +253,7 @@ def build_digest(
         candidates.append((canon_id, job, _match_result_from_row(row)))
 
     eligible: list[tuple[int, Job, MatchResult]] = []
+    native_waiting = 0
     for canon_id, job, mr in candidates:
         # LLM parse failed for this job this run -> raw-listing score only;
         # never recommendation-eligible (the JobMatch row still stands for
@@ -278,6 +280,13 @@ def build_digest(
                 ).total_seconds() / 86400.0
                 if elapsed < cooldown_days:
                     continue
+        # D. two-part email: a job with a Naukri Apply button belongs to telegram-apply, not to the
+        #    "apply yourself" list. Counted (only AFTER passing every gate above) so the email can
+        #    say how many are waiting. The cap below then applies to what is left, so natives
+        #    never use up the manual list's slots.
+        if manual_apply_only and job.apply_type == "native":
+            native_waiting += 1
+            continue
         # C. never recommended, not applied -> eligible
         eligible.append((canon_id, job, mr))
 
@@ -372,4 +381,57 @@ def build_digest(
         truncated=eligible_count > settings.daily_recommendation_limit,
         recommendations=recs,
         run_id=run_id,
+        two_part=manual_apply_only,
+        native_waiting=native_waiting,
     )
+
+
+def previous_digest_time(session: Session, before_run_id: int | None, now: datetime.datetime) -> datetime.datetime:
+    """When the previous COMPLETED digest was produced (naive UTC): Part 2 of today's email
+    lists what the app applied to since then. Falls back to 24h ago if there was none."""
+    from naukri_agent.database.models import DailyRun, DailyRunStatus
+
+    q = session.query(DailyRun).filter(DailyRun.status == DailyRunStatus.COMPLETED)
+    if before_run_id is not None:
+        q = q.filter(DailyRun.id < before_run_id)
+    prev = q.order_by(DailyRun.id.desc()).first()
+    if prev is not None:
+        stamp = prev.finished_at or prev.started_at
+        if stamp is not None:
+            return _naive_utc(stamp)
+    return _naive_utc(now) - datetime.timedelta(hours=24)
+
+
+def applied_via_agent_since(session: Session, since: datetime.datetime, limit: int = 50):
+    """Applications the app made (supervised apply, telegram-apply, auto-apply) at or after
+    `since`, oldest first, each with the answers it sent. Manual mark-applied records are NOT
+    included: this is "what the app did for you"."""
+    from naukri_agent.database.models import ApplicationHistory, ApplicationQuestion
+    from naukri_agent.recommendations.models import AppliedViaAgent
+
+    rows = (
+        session.query(ApplicationHistory)
+        .filter(
+            ApplicationHistory.source.like("agent_auto_apply%"),
+            ApplicationHistory.applied_at >= _naive_utc(since),
+        )
+        .order_by(ApplicationHistory.applied_at.asc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for row in rows:
+        answers = [
+            (q.question_text, q.final_answer)
+            for q in session.query(ApplicationQuestion)
+            .filter_by(application_id=row.id)
+            .order_by(ApplicationQuestion.order_in_attempt)
+            if q.final_answer is not None
+        ]
+        out.append(
+            AppliedViaAgent(
+                job_title=row.job_title, company=row.company, location=row.location,
+                job_url=row.job_url, applied_at=row.applied_at, source=row.source or "", answers=answers,
+            )
+        )
+    return out

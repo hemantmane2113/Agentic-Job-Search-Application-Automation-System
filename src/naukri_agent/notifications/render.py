@@ -68,7 +68,84 @@ def _block(rec: Recommendation) -> str:
     return "\n".join(lines)
 
 
+def _local_time(moment, tz_name: str) -> str | None:
+    """A stored (naive UTC) timestamp as local wall-clock time, e.g. '08 Oct 2026, 01:27 PM'."""
+    if moment is None:
+        return None
+    import datetime as _dt
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        local = moment.replace(tzinfo=_dt.UTC).astimezone(ZoneInfo(tz_name))
+        return local.strftime("%d %b %Y, %I:%M %p")
+    except Exception:  # noqa: BLE001 - no tz database: say so rather than show a wrong clock
+        return moment.strftime("%d %b %Y, %H:%M UTC")
+
+
+def _applied_block(i: int, a, tz_name: str) -> str:
+    lines = [f"{i}. {a.job_title} — {a.company}"]
+    if a.location:
+        lines.append(f"   Location: {a.location}")
+    when = _local_time(a.applied_at, tz_name)
+    if when:
+        lines.append(f"   Applied: {when}")
+    for question, answer in a.answers:
+        lines.append(f"   Q: {question}")
+        lines.append(f"   A: {answer}")
+    lines.append(f"   Naukri: {a.job_url}")
+    return "\n".join(lines)
+
+
+def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailMessage:
+    date_str = digest.run_date.strftime("%d %b %Y")
+    n1, n2 = digest.count, len(digest.applied_via_agent)
+    subject = f"{settings.email_subject_prefix} {n1} to apply yourself, {n2} applied for you — {date_str}"
+
+    part1 = [f"PART 1 — APPLY YOURSELF ON THE COMPANY'S WEBSITE ({n1})"]
+    if n1:
+        part1.append(
+            "These match your criteria but only offer \"Apply on company site\". Open each link, "
+            "press that button on Naukri, and apply on the company's own website. Afterwards record it "
+            "with: naukri-agent mark-applied <job>."
+        )
+        if digest.truncated:
+            part1.append(
+                f"Note: {digest.eligible_count - digest.count} more eligible job(s) not shown "
+                f"(daily limit {digest.limit})."
+            )
+    else:
+        part1.append("None today.")
+    for note in digest.notes:
+        part1.append(f"Note: {note}")
+
+    part2 = [f"PART 2 — APPLIED FOR YOU VIA TELEGRAM ({n2}), since the last digest"]
+    if n2:
+        part2.append("")
+        part2.append("\n\n".join(_applied_block(i, a, settings.timezone) for i, a in enumerate(digest.applied_via_agent, 1)))
+    else:
+        part2.append("Nothing was applied via Telegram since the last digest.")
+
+    sections = [f"Daily Naukri job digest — {date_str}", "\n".join(part1)]
+    sections += [_block(r) for r in digest.recommendations]
+    sections.append("\n".join(part2))
+    if digest.native_waiting:
+        s = "" if digest.native_waiting == 1 else "s"
+        sections.append(
+            f"{digest.native_waiting} more matching job{s} with a Naukri Apply button "
+            f"{'is' if digest.native_waiting == 1 else 'are'} waiting for you. Run: naukri-agent telegram-apply"
+        )
+    body = "\n\n".join(sections) + (
+        "\n\n---\n"
+        "Part 1 applications are manual. Part 2 were made by the app only after you tapped Yes on Telegram.\n"
+        "Application status is from your local database only.\n"
+    )
+    return EmailMessage(to=digest.candidate_email, subject=subject, text_body=body)
+
+
 def render_digest(digest: RecommendationDigest, settings: Settings) -> EmailMessage:
+    if digest.two_part:
+        return _render_two_part(digest, settings)
     date_str = digest.run_date.strftime("%d %b %Y")
     subject = f"{settings.email_subject_prefix} {digest.count} job matches — {date_str}"
 

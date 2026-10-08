@@ -409,7 +409,8 @@ def run_auto_apply(
 
                     with session_scope(factory) as s:
                         row, _ = upsert_application_history(
-                            s, job["job_id"], source="agent_auto_apply_unattended",
+                            s, job["job_id"],
+                            source="agent_auto_apply_telegram" if interaction is not None else "agent_auto_apply_unattended",
                             note="Applied unattended by naukri-agent auto-apply; Naukri used the profile default resume. "
                                  + "; ".join(submission.notes),
                         )
