@@ -987,3 +987,33 @@ def last_uploaded_resume(session: Session):
         .order_by(ResumeRefresh.id.desc())
         .first()
     )
+
+
+def add_job_research(
+    session: Session, *, job_id: int, status: str, model: str, report_json: str | None = None,
+    error: str | None = None, steps: int = 0, prompt_tokens: int = 0, completion_tokens: int = 0,
+    created_at: "datetime.datetime | None" = None,
+):
+    from naukri_agent.database.models import JobResearch
+
+    row = JobResearch(
+        job_id=job_id, status=status, model=model, report_json=report_json, error=(error or None) and error[:200],
+        steps=steps, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+    )
+    if created_at is not None:
+        row.created_at = _naive_utc(created_at)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def job_ids_researched_since(session: Session, since: "datetime.datetime") -> set[int]:
+    """Jobs with a SUCCESSFUL research row at or after `since` (a failed attempt may be retried)."""
+    from naukri_agent.database.models import JobResearch
+
+    rows = (
+        session.query(JobResearch.job_id)
+        .filter(JobResearch.status == "ok", JobResearch.created_at >= _naive_utc(since))
+        .all()
+    )
+    return {r[0] for r in rows}

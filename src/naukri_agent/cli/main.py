@@ -235,6 +235,42 @@ def watchdog(dry_run: bool) -> None:
         sys.exit(1)
 
 
+@cli.command("research-jobs")
+@click.option("--max-jobs", type=click.IntRange(min=1), default=None, help="Research at most this many jobs (default: RESEARCH_MAX_JOBS).")
+@click.option("--job-id", type=int, default=None, help="Research this one job, even if it was done recently.")
+@click.option("--dry-run", is_flag=True, default=False, help="Print the reports; save nothing and send nothing.")
+def research_jobs(max_jobs: int | None, job_id: int | None, dry_run: bool) -> None:
+    """
+    Run the company-site job researcher (an AI agent with read-only tools) over the jobs the latest
+    digest told you to apply for yourself. For each job it looks for the company's own careers page,
+    saves a report, and sends it to you on Telegram. It never applies, clicks or logs in anywhere.
+    """
+    settings = get_settings()
+    from naukri_agent.research_agent.runner import ResearchConfigError, run_research
+
+    notify = None
+    if not dry_run and settings.telegram_bot_token and settings.telegram_chat_id:
+        from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
+
+        notify = build_telegram_interaction(settings).notify
+    try:
+        result = _explain_busy_database(
+            lambda: run_research(settings, notify=notify, max_jobs=max_jobs, job_id=job_id, dry_run=dry_run)
+        )
+    except ResearchConfigError as exc:
+        raise click.ClickException(str(exc))
+    for o in result.outcomes:
+        click.echo(("\n" + o.message) if o.message else f"\nJob {o.job_id} ({o.title}): failed - {o.error}")
+    click.echo(f"\nResearched {result.researched} of {result.considered} job(s); {result.failed} failed.")
+    used = sum(o.prompt_tokens + o.completion_tokens for o in result.outcomes)
+    if used:
+        click.echo(f"Model tokens used: {used}")
+    for note in result.notes:
+        click.echo(f"Note: {note}")
+    if result.failed:
+        sys.exit(1)
+
+
 @cli.command("profile-refresh")
 @click.option("--execute", is_flag=True, default=False,
               help="Actually upload the next resume (needs PROFILE_REFRESH_ENABLED=true). Without it: dry run.")

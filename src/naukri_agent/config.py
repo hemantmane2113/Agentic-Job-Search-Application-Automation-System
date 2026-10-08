@@ -189,6 +189,25 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     openai_api_key: str = ""
 
+    # --- Company-site job researcher (`research-jobs`) ---
+    # A tool-using agent: a hosted Groq model (it reuses GROQ_API_KEY) chooses read-only tools to
+    # find the company's own careers page for the jobs the digest says to apply for yourself.
+    # It never applies, clicks or logs in anywhere, and sees only public job text.
+    research_llm_model: str = "openai/gpt-oss-120b"  # a Groq model that supports tool calling (llama-3.3-70b was retired)
+    research_llm_timeout_seconds: float = 60.0
+    # Web search for the careers page. Pick whichever you have a key for; with none, the agent still
+    # works in a weaker mode (the Naukri company page, plus pages it can guess such as /careers).
+    serper_api_key: str = ""  # https://serper.dev  (has a free starter allowance)
+    brave_api_key: str = ""  # https://api.search.brave.com  (now a paid plan)
+    research_search_provider: str = "auto"  # auto | serper | brave | none
+    research_max_jobs: int = 5  # jobs researched per command
+    research_max_steps: int = 8  # model turns per job, then it must submit what it has
+    research_max_fetches: int = 5  # web pages read per job
+    research_max_searches: int = 3  # web searches per job
+    research_page_max_bytes: int = 300_000  # larger pages are cut off
+    research_compact_history: bool = False  # shorten OLDER tool results each turn; tested: no consistent gain, so OFF
+    research_skip_days: int = 7  # a job researched within this many days is not redone
+
     # --- Naukri credentials (Phase 7) ---
     naukri_email: str = ""
     naukri_password: str = ""

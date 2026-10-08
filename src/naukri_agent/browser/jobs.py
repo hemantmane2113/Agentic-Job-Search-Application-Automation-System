@@ -436,3 +436,40 @@ def _is_present(page: Any, selector: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         logger.debug("query_selector(%r) raised %s; treating as not present", selector, exc)
         return False
+
+
+_FIND_COMPANY_LINK_JS = "(sel) => { const a = document.querySelector(sel); return a ? a.href : null; }"
+
+_COMPANY_SUMMARY_JS = r"""
+() => {
+  const lines = (document.body ? document.body.innerText : '').split('\n').map(s => s.trim()).filter(Boolean);
+  const first = (re) => lines.find(l => re.test(l) && l.length < 60) || null;
+  return {
+    title: document.title.slice(0, 120),
+    rating: first(/^\d(\.\d)?$/),
+    reviews: first(/reviews?$/i),
+    locations: lines.filter(l => /\(.*\)/.test(l) && l.length < 80).slice(0, 4),
+    text: lines.join('\n').slice(0, 3500),
+  };
+}
+"""
+
+
+def read_company_page(page: Any, job_url: str) -> dict:
+    """
+    READ-ONLY: open a job page, follow its link to the company's Naukri page (only if that link is on
+    naukri.com), and return the visible summary. Nothing is clicked or typed. Raises ValueError when
+    the job page has no company link.
+    """
+    from urllib.parse import urlsplit
+
+    page.goto(job_url)
+    page.wait_for_load_state("domcontentloaded", timeout=30000)
+    href = page.evaluate(_FIND_COMPANY_LINK_JS, selectors.COMPANY_PAGE_LINK)
+    host = (urlsplit(href).hostname or "") if href else ""
+    if not href or not (host == "naukri.com" or host.endswith(".naukri.com")):
+        raise ValueError("the job page has no Naukri company page link")
+    page.goto(href)
+    page.wait_for_load_state("domcontentloaded", timeout=30000)
+    page.wait_for_timeout(2000)
+    return page.evaluate(_COMPANY_SUMMARY_JS)

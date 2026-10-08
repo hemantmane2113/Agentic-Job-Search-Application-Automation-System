@@ -315,3 +315,11 @@ LINKEDIN_CHALLENGE_URL_FRAGMENTS = ("/checkpoint", "/challenge", "captcha")
 LINKEDIN_JOB_LINK = "a[href*='/jobs/view/']"  # UNVERIFIED
 LINKEDIN_JOB_TITLE = "h1"  # UNVERIFIED
 LINKEDIN_APPLY_CONTROL_CANDIDATES = "button, a, [role='button']"  # UNVERIFIED; filtered by text in the probe
+
+
+# --- Company page (read by the company-site job researcher; read-only) ---
+# VERIFIED 2026-10-08 against 4 real company-site job pages: each carries a link to the company's
+# Naukri page whose address contains "-jobs-careers-". The company-site Apply button itself is a plain
+# <button id="company-site-button"> with NO link behind it, so the destination is not on the page and
+# nothing here ever clicks it.
+COMPANY_PAGE_LINK = "a[href*='-jobs-careers-']"

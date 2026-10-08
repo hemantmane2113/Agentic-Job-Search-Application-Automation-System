@@ -25,6 +25,8 @@ dependencies = [
     "openpyxl>=3.1",           # Excel reporting mirror (regenerated from the DB)
     # -- Stage B --
     "apscheduler>=3.10",       # in-process daily scheduler (`naukri-agent scheduler`)
+    # -- Company-site job researcher --
+    "httpx>=0.27",             # safe, size-capped page fetches and web search
 ]
 
 [project.optional-dependencies]

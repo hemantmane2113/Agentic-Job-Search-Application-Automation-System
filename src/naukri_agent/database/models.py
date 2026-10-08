@@ -773,3 +773,29 @@ class ResumeRefresh(Base):
     attempted_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
     )
+
+
+class JobResearch(Base):
+    """
+    One row per research attempt by the company-site job researcher agent (`research-jobs`).
+    `report_json` holds the validated report (company summary, careers page, apply-link
+    candidates the agent actually saw, flags, sources). Advisory only: never consulted by scoring,
+    recommendation or application logic.
+
+    status: "ok" | "failed"
+    """
+
+    __tablename__ = "job_research"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    steps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
