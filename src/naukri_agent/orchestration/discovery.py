@@ -172,8 +172,48 @@ def build_query_matrix(profile: CandidateProfile, settings: Settings) -> list[Di
         return out
     roles = list(profile.preferred_roles) or ([profile.full_name] if False else [])
     locations = list(profile.preferred_locations) or [""]
-    matrix = [DiscoveryQuery(role=r, location=l) for r in roles for l in locations]
+    if settings.discovery_search_every_city:
+        return [DiscoveryQuery(role=r, location=l) for r in roles for l in locations]
+    # Role-only searches (all of India) first, then one city at a time with every role taking its turn, so that
+    # discover_and_store can stop as soon as it has enough fresh jobs.
+    matrix = [DiscoveryQuery(role=r) for r in roles]
+    matrix += [DiscoveryQuery(role=r, location=l) for l in locations if l for r in roles]
     return matrix
+
+
+def _freshness_pass(lanes_by_role, posted_by_url, settings):
+    """
+    De-dup the cards found so far (every group taking equal turns), apply the discovery ceiling and the freshness
+    window, and pick the day's jobs. Returns (fair_cards, aged, unknown_excluded, stale_excluded, chosen).
+    Absent or unparseable posted labels are EXCLUDED, never assumed fresh.
+    """
+    fair_cards = _fair_card_order(lanes_by_role)
+    considered = fair_cards[: settings.discovery_max_total_jobs]
+    aged: list[tuple[str, str, int]] = []
+    unknown = 0
+    stale = 0
+    for role, u in considered:
+        age = _parse_card_age_days(posted_by_url.get(u))
+        if age is None:
+            unknown += 1
+            continue
+        if age > settings.discovery_freshness_days:
+            stale += 1
+            continue
+        aged.append((role, u, age))
+    chosen = _fair_select(aged, settings.discovery_fresh_job_limit)
+    return fair_cards, aged, unknown, stale, chosen
+
+
+def _have_enough(aged, chosen, group_ids, settings) -> bool:
+    """The day's quota is filled AND every resume group holds its equal share of it."""
+    if len(chosen) < settings.discovery_fresh_job_limit:
+        return False
+    need = settings.discovery_fresh_job_limit // max(1, len(group_ids))
+    per_group: dict[str, int] = {}
+    for role, _u, _age in aged:
+        per_group[role] = per_group.get(role, 0) + 1
+    return all(per_group.get(g, 0) >= need for g in group_ids)
 
 
 def discover_and_store(
@@ -192,6 +232,9 @@ def discover_and_store(
     groups = role_groups if role_groups is not None else _role_groups_from_registry(settings)
     queries_run = 0
     queries_failed = 0
+    stopped_early = False
+    # A search list that was spelled out (--query, DISCOVERY_QUERIES) is always run as given.
+    stop_when_enough = not settings.discovery_search_every_city and not settings.discovery_queries
     lanes_by_role: dict[str, list[list[str]]] = {}
     # url -> raw search-card posted-date label (first sighting wins, so
     # this mirrors the URL-dedup "first occurrence wins" rule below).
@@ -228,32 +271,19 @@ def discover_and_store(
             status=RunEventStatus.OK,
             detail={"query": f"{q.role} @ {q.location}", "results": len(picked)},
         )
+        if stop_when_enough:
+            _fc, aged_now, _u, _s, chosen_now = _freshness_pass(lanes_by_role, posted_by_url, settings)
+            if _have_enough(aged_now, chosen_now, set(groups.values()) | set(lanes_by_role), settings):
+                stopped_early = queries_run < len(matrix)
+                break
 
     # de-dup, in an order where every GROUP (= resume) takes equal turns (so neither the ceiling nor the daily
     # cap below can drop the last roles in the list), then apply the hard discovery ceiling.
-    fair_cards = _fair_card_order(lanes_by_role)
+    fair_cards, aged, unknown_freshness, stale_excluded, chosen = _freshness_pass(
+        lanes_by_role, posted_by_url, settings
+    )
     discovered_card_count = len(fair_cards)
-    considered = fair_cards[: settings.discovery_max_total_jobs]
-
-    # --- Phase F1: freshness-first gate (deterministic; no LLM) --------
-    # Keep only cards whose posted-date label parses to <= the freshness
-    # window, sort them newest -> oldest (stable, so equal-age jobs keep
-    # Naukri's query order), and cap the survivors. Absent/unparseable
-    # labels are EXCLUDED, never assumed fresh, and counted here.
     window_days = settings.discovery_freshness_days
-    aged: list[tuple[str, str, int]] = []
-    unknown_freshness = 0
-    stale_excluded = 0
-    for role, u in considered:
-        age = _parse_card_age_days(posted_by_url.get(u))
-        if age is None:
-            unknown_freshness += 1
-            continue
-        if age > window_days:
-            stale_excluded += 1
-            continue
-        aged.append((role, u, age))
-    chosen = _fair_select(aged, settings.discovery_fresh_job_limit)
     fresh_capped = [u for _role, u in chosen]
 
     seq += 1
@@ -271,6 +301,9 @@ def discover_and_store(
             "unknown_excluded": unknown_freshness,
             "fresh_cap": settings.discovery_fresh_job_limit,
             "selected": len(fresh_capped),
+            "searches_run": queries_run,
+            "searches_planned": len(matrix),
+            "stopped_early": stopped_early,
         },
     )
 

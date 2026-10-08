@@ -264,6 +264,11 @@ class Settings(BaseSettings):
     # from CandidateProfile.preferred_roles x preferred_locations.
     discovery_queries: list[str] | None = None
     discovery_max_jobs_per_query: int = 40
+    # False (default): find the day's jobs with as few searches as it takes. The role-only searches (all of India)
+    # run first, then city searches are added one at a time, and the moment discovery_fresh_job_limit fresh jobs
+    # are found, with every resume group holding an equal share, it stops searching. True: the old behaviour,
+    # every role in every preferred city. An explicit discovery_queries list is always run as given.
+    discovery_search_every_city: bool = False
     discovery_max_total_jobs: int = 200
 
     # Freshness-first daily feed (Phase F1). After dedup and the
