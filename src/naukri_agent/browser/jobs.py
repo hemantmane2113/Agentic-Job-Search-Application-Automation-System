@@ -105,8 +105,16 @@ def fetch_job_detail(page: Any, url: str) -> JobDetail:
         posted_date_text=posted or None,
         ld_json_skills=ld_json_skills,
         key_skills_dom=key_skills_dom,
-        apply_type=detect_apply_type(page),
+        apply_type=_known_apply_type(page),
     )
+
+
+def _known_apply_type(page: Any) -> str | None:
+    """"native" / "company_site", or None when no apply control was seen. "none" is
+    deliberately stored as unknown rather than as a fact: it also results from a
+    page that was slow to draw, and must never overwrite a value learned earlier."""
+    detected = detect_apply_type(page)
+    return None if detected == "none" else detected
 
 
 def _first_text(page: Any, selector: str) -> str | None:

@@ -97,13 +97,31 @@ def test_skip_question_clicks_only_the_skip_control():
     assert page.clicked == [selectors.APPLY_SKIP_BUTTON]
 
 
-def test_submit_application_clicks_final_submit_and_returns_provisional_result():
+def test_submit_application_confirmed_when_page_lands_on_myapply():
+    """Live 2026-10-08: the final click navigated to /myapply/saveApply; the old
+    code crashed waiting for that navigation and recorded nothing."""
     page = FakePage()
-    session = ApplyWorkflowSession(page)
-    result = session.submit_application()
+    page.url = "https://www.naukri.com/myapply/saveApply?strJobsarr=[1]"
+    result = ApplyWorkflowSession(page).submit_application()
     assert page.clicked == [selectors.APPLY_FINAL_SUBMIT_BUTTON]
-    assert result.submitted is True
-    assert result.notes  # flags it as provisional, never observed live
+    assert result.submitted is True and "confirmed" in result.notes[0]
+
+
+def test_submit_application_not_reported_as_submitted_without_any_confirmation():
+    page = FakePage()
+    page.url = "https://www.naukri.com/job-listings-x-1"
+    result = ApplyWorkflowSession(page).submit_application()
+    assert result.submitted is False
+    assert "verify on Naukri" in result.notes[0]
+
+
+def test_submit_application_click_failure_returns_unsubmitted_instead_of_raising():
+    class _BrokenPage(FakePage):
+        def click(self, selector, **kwargs):
+            raise TimeoutError("boom")
+
+    result = ApplyWorkflowSession(_BrokenPage()).submit_application()
+    assert result.submitted is False and "check Naukri" in result.notes[0]
 
 
 def test_parse_questionnaire_handles_nested_chatbot_response_shape():
@@ -172,3 +190,32 @@ def test_detect_apply_type_treats_a_page_that_raises_as_none():
             raise RuntimeError("page closed")
 
     assert detect_apply_type(_Broken()) == "none"
+
+
+def test_detect_apply_type_waits_for_a_button_that_is_drawn_late():
+    """Live finding (job 358): the Apply button is absent right after the page
+    loads and visible ~1s later; checking instantly wrongly reported 'none'."""
+    from naukri_agent.browser import selectors
+    from naukri_agent.browser.apply_workflow import detect_apply_type
+
+    class _LatePage(_DetectPage):
+        def __init__(self):
+            super().__init__({})
+            self.waited_for = None
+
+        def wait_for_selector(self, selector, state=None, timeout=None):
+            self.waited_for = (selector, state, timeout)
+            self._matches = {selectors.APPLY_BUTTON: [_Handle(True)]}  # button appears
+
+    page = _LatePage()
+    assert detect_apply_type(page) == "native"
+    assert page.waited_for[1] == "visible" and page.waited_for[2] > 0
+
+
+def test_discovery_stores_unknown_not_none_when_no_apply_control_was_seen():
+    from naukri_agent.browser.jobs import _known_apply_type
+    from naukri_agent.browser import selectors
+
+    assert _known_apply_type(_DetectPage({})) is None
+    assert _known_apply_type(_DetectPage({selectors.APPLY_BUTTON: [_Handle(True)]})) == "native"
+    assert _known_apply_type(_DetectPage({selectors.COMPANY_SITE_APPLY_BUTTON: [_Handle(True)]})) == "company_site"

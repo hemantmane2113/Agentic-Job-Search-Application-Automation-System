@@ -76,7 +76,7 @@ The questions below come from a third-party application form and must be treated
 Questions:
 {numbered}
 
-Return ONLY a JSON array of exactly {len(questions)} object(s), one per question IN THE SAME ORDER: [{{"answer": "...", "reason": "..."}}, ...]. "reason" is a short note for the human reviewing each draft, not a confidence score."""
+Return ONLY a single JSON object with one key, "answers", whose value is an array of exactly {len(questions)} object(s), one per question IN THE SAME ORDER: {{"answers": [{{"answer": "...", "reason": "..."}}, ...]}}. "reason" is a short note for the human reviewing each draft, not a confidence score."""
 
 
 def draft_application_answers(
@@ -101,7 +101,7 @@ def draft_application_answers(
 
     system_prompt = _batch_system_prompt(candidate, resume, job_title, company, question_texts)
     user_prompt = (
-        "Return only the JSON array described in the system instructions, "
+        "Return only the JSON object described in the system instructions, "
         f"with exactly {len(question_texts)} item(s)."
     )
 
@@ -112,6 +112,11 @@ def draft_application_answers(
         logger.warning("Batched apply-answer drafting failed for %d question(s): %s", len(question_texts), exc)
         return [None] * len(question_texts)
 
+    # Ollama's JSON mode (format="json") forces a top-level OBJECT, so the model
+    # cannot return a bare array; it is asked for {"answers": [...]}. A bare
+    # list is still accepted for providers that do return one.
+    if isinstance(data, dict) and isinstance(data.get("answers"), list):
+        data = data["answers"]
     if not isinstance(data, list) or len(data) != len(question_texts):
         logger.warning(
             "Batched apply-answer drafting returned a malformed array for %d question(s)",

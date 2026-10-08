@@ -107,6 +107,25 @@ class NaukriClient(JobBoardClient):
         except Exception:  # noqa: BLE001 - a slow settle must not abort; click_apply() has its own timeout
             pass
 
+    def prepare_next_application(self) -> None:
+        self._get_apply_session().reset_capture()
+
+    def application_question_field_count(self) -> int:
+        """Input fields visible on the application screen; -1 if it could not be read."""
+        try:
+            from naukri_agent.browser.apply_inspection import extract_application_ui
+
+            return extract_application_ui(self._page).question_field_count
+        except Exception:  # noqa: BLE001
+            return -1
+
+    def screenshot(self, path: Any) -> bool:
+        try:
+            self._page.screenshot(path=str(path))
+            return True
+        except Exception:  # noqa: BLE001 - a missing screenshot must never fail an application
+            return False
+
     def detect_apply_type(self) -> str:
         from naukri_agent.browser.apply_workflow import detect_apply_type
 

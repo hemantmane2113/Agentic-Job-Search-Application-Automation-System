@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -56,6 +57,9 @@ _APPLY_INIT_ALLOWLIST: frozenset[tuple[str, str]] = frozenset({("POST", _APPLY_I
 
 _LIST_QUESTIONS_POLL_COUNT = 6
 _LIST_QUESTIONS_POLL_INTERVAL_MS = 500
+_APPLIED_POLL_COUNT = 12
+_APPLIED_POLL_INTERVAL_MS = 1000
+_APPLIED_TEXT_RE = re.compile(r"applied|application (has been )?(sent|submitted)", re.I)
 
 
 def _exact_path(raw: str) -> str:
@@ -188,6 +192,13 @@ class ApplyWorkflowSession:
         self._capture.install(self._page)
         self._installed = True
 
+    def reset_capture(self) -> None:
+        """Forget the previous job's apply-init response. The capture keeps only the
+        FIRST response it sees, so a session that handles several jobs in a row
+        would otherwise keep reading the first job's questions."""
+        self._capture.body = None
+        self._capture.notes = []
+
     def click_apply(self) -> None:
         self._ensure_installed()
         self._page.click(selectors.APPLY_BUTTON)
@@ -215,12 +226,43 @@ class ApplyWorkflowSession:
         self._page.click(selectors.APPLY_SKIP_BUTTON)
 
     def submit_application(self) -> ApplySubmissionResult:
-        self._page.click(selectors.APPLY_FINAL_SUBMIT_BUTTON)
+        try:
+            # no_wait_after: a successful submit navigates away (seen live on
+            # 2026-10-08: to /myapply/saveApply). Playwright's default wait for
+            # that navigation to settle timed out and crashed AFTER the
+            # application had already been sent, so nothing got recorded.
+            self._page.click(selectors.APPLY_FINAL_SUBMIT_BUTTON, no_wait_after=True)
+        except Exception as exc:  # noqa: BLE001
+            return ApplySubmissionResult(
+                submitted=False,
+                notes=[
+                    f"final submit click did not complete ({type(exc).__name__}); "
+                    "check Naukri before trying again"
+                ],
+            )
+        signal = self._wait_for_applied_signal()
+        if signal:
+            return ApplySubmissionResult(submitted=True, notes=[f"confirmed: {signal}"])
         return ApplySubmissionResult(
-            submitted=True,
-            notes=[
-                "final submit control clicked; a real confirmation UI has never "
-                "been observed — treat this result as provisional until verified "
-                "against a live run"
-            ],
+            submitted=False,
+            notes=["clicked, but no confirmation was seen; verify on Naukri before trying again"],
         )
+
+    def _wait_for_applied_signal(self) -> str | None:
+        """Poll briefly for proof the application went through: the page moved to
+        Naukri's /myapply/ result page, or the page text now says applied. Never raises."""
+        for _ in range(_APPLIED_POLL_COUNT):
+            try:
+                url = self._page.url or ""
+                if "/myapply/" in url:
+                    return "page moved to Naukri's /myapply/ result page"
+                text = self._page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+                if _APPLIED_TEXT_RE.search(str(text)):
+                    return "page text reports the job as applied"
+                self._page.wait_for_timeout(_APPLIED_POLL_INTERVAL_MS)
+            except Exception:  # noqa: BLE001 - mid-navigation reads can fail; keep polling
+                try:
+                    self._page.wait_for_timeout(_APPLIED_POLL_INTERVAL_MS)
+                except Exception:  # noqa: BLE001
+                    return None
+        return None

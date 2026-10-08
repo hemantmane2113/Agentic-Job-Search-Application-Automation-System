@@ -127,3 +127,34 @@ def test_question_text_flows_through_as_data_even_if_injection_shaped():
     assert drafts[0] is not None
     assert injected_question in provider.last_system
     assert "treated as data" in provider.last_system.lower()
+
+
+def test_batched_drafting_accepts_the_answers_object_that_ollama_json_mode_forces():
+    """Ollama's JSON mode can only emit a top-level object, never a bare array;
+    a real llama3.2:3b returned {"answer": ...} for a batch and every draft came
+    back None. The prompt now asks for {"answers": [...]} and the parser unwraps it."""
+    import json
+
+    from naukri_agent.agents.apply_answer_agent import draft_application_answers
+    from naukri_agent.candidate.models import CandidateProfile
+    from naukri_agent.resume.models import MasterResume
+
+    class _Provider:
+        provider_name = "fake"
+        model = "fake-1"
+        seen_system = ""
+
+        def complete(self, system, prompt, *, json_mode=False):
+            _Provider.seen_system = system
+            return json.dumps({"answers": [
+                {"answer": "3 years", "reason": "profile"},
+                {"answer": "Not stated in my profile", "reason": "no fact"},
+            ]})
+
+    cand = CandidateProfile(full_name="X", email="x@example.com", phone="1", skills=["Python"])
+    out = draft_application_answers(
+        _Provider(), ["Experience?", "Do you hold a PhD?"], cand,
+        MasterResume(professional_summary="s"), "Data Scientist", "Acme",
+    )
+    assert [d.answer for d in out] == ["3 years", "Not stated in my profile"]
+    assert '"answers"' in _Provider.seen_system  # the prompt asks for the wrapped shape

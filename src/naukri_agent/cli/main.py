@@ -331,6 +331,91 @@ def apply_(job: str, reuse_session: bool) -> None:
         sys.exit(1)
 
 
+@cli.command("auto-apply")
+def auto_apply_cmd() -> None:
+    """
+    UNATTENDED: apply to eligible jobs that have a plain Naukri Apply button
+    (never the "Apply on company site" ones - those come to you by email).
+    Needs ALL of AUTO_APPLY=true, DRY_RUN=false and AUTO_APPLY_UNATTENDED=true,
+    stops while the pause file exists, applies only to ACCEPT-level matches (up
+    to AUTO_APPLY_DAILY_CAP per 24h), answers screening questions only from your
+    profile when certain, and otherwise submits nothing and emails the job to
+    you. Never reachable from run-daily/discover/scheduler.
+    """
+    from naukri_agent.orchestration.auto_apply_runner import run_auto_apply
+
+    result = run_auto_apply(get_settings())
+    click.echo(json.dumps(result.model_dump(), indent=2, default=str))
+    if result.blocked_reason:
+        sys.exit(2)
+    if any(o.outcome in ("failed", "unconfirmed") for o in result.outcomes) or (
+        result.stopped_reason and result.stopped_reason.startswith("could not run")
+    ):
+        sys.exit(1)
+
+
+@cli.command("telegram-setup")
+@click.option("--wait", default=120, show_default=True, help="Seconds to wait for you to message the bot.")
+def telegram_setup(wait: int) -> None:
+    """
+    One-time Telegram setup. Create a bot with @BotFather, put its token in .env as
+    TELEGRAM_BOT_TOKEN, open the bot on your phone and send it any message, then run
+    this to find your chat id (and get a hello back to prove it works).
+    """
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        raise click.ClickException("Set TELEGRAM_BOT_TOKEN in .env first (create a bot with @BotFather).")
+    from naukri_agent.notifications.telegram import TelegramChannel, TelegramError
+
+    click.echo(f"Open your bot in Telegram and send it any message (waiting up to {wait}s)...")
+    try:
+        chat_id = TelegramChannel(settings.telegram_bot_token, "0").discover_chat_id(wait)
+    except TelegramError as exc:
+        raise click.ClickException(f"Telegram rejected the request ({exc}). Check TELEGRAM_BOT_TOKEN.")
+    if chat_id is None:
+        raise click.ClickException("No message reached the bot in time. Send it a message and run this again.")
+    click.echo(f"Found your chat id. Add this line to .env:\n\nTELEGRAM_CHAT_ID={chat_id}")
+    try:
+        TelegramChannel(settings.telegram_bot_token, chat_id).send(
+            "naukri-agent is connected. After TELEGRAM_CHAT_ID is in .env, jobs will be sent here for your Yes/No."
+        )
+    except TelegramError:
+        click.echo("(Could not send the hello message, but the chat id above is still right.)")
+
+
+@cli.command("telegram-apply")
+def telegram_apply() -> None:
+    """
+    Apply to eligible jobs that have a plain Naukri Apply button, with YOU approving
+    on Telegram: each job is sent to your phone and nothing is clicked until you tap
+    Yes; every screening question is sent for you to answer; if there were questions
+    you confirm once more before it submits. Silence always means no. Needs
+    AUTO_APPLY=true and DRY_RUN=false plus TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
+    Only ACCEPT-level matches, at most AUTO_APPLY_DAILY_CAP per 24h. Never reachable
+    from run-daily/discover/scheduler.
+    """
+    settings = get_settings()
+    from naukri_agent.orchestration.auto_apply_runner import run_auto_apply
+    from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
+
+    try:
+        interaction = build_telegram_interaction(settings)
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+
+    result = run_auto_apply(settings, interaction=interaction)
+    if not result.blocked_reason:
+        interaction.notify(
+            f"Run finished: {result.applied} applied, {len(result.outcomes)} job(s) handled."
+            + (f" Stopped: {result.stopped_reason}" if result.stopped_reason else "")
+        )
+    click.echo(json.dumps(result.model_dump(), indent=2, default=str))
+    if result.blocked_reason:
+        sys.exit(2)
+    if any(o.outcome in ("failed", "unconfirmed") for o in result.outcomes):
+        sys.exit(1)
+
+
 @cli.command("email-outreach")
 @click.argument("job")
 def email_outreach(job: str) -> None:

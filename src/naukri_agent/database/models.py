@@ -729,3 +729,25 @@ class EmailOutreachAttempt(Base):
             f"mode={self.mode.value} status={self.status.value}>"
         )
 
+
+class AutoApplyAttempt(Base):
+    """
+    One row per job the UNATTENDED auto-apply run opened and tried, whatever
+    the result. This is the run's memory: it stops the same job being
+    retried every day, and it feeds the daily cap. An application that
+    actually went through is ALSO recorded in ApplicationHistory (the only
+    authoritative record of whether you applied); this table never is.
+
+    outcome: "applied" | "needs_human" | "unconfirmed" | "failed" | "not_native"
+    """
+
+    __tablename__ = "auto_apply_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempted_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )

@@ -53,6 +53,24 @@ class Settings(BaseSettings):
     # `apply` command. Defaults false so nothing changes for anyone not
     # explicitly opting in.
     auto_apply: bool = False
+    # Third gate, on top of auto_apply and dry_run, for the UNATTENDED
+    # `auto-apply` command only. Off by default: building the capability
+    # applies to nothing until this is switched on deliberately.
+    auto_apply_unattended: bool = False
+    auto_apply_daily_cap: int = 3  # rolling 24h, counts applied + unconfirmed
+    auto_apply_decisions: list[str] = Field(default_factory=lambda: ["ACCEPT"])
+    auto_apply_max_job_age_days: int = 7
+    # While this file exists, auto-apply refuses to run. A manual kill switch.
+    auto_apply_pause_file: Path = Path("./data/PAUSE_AUTO_APPLY")
+
+    # --- Telegram: the human-in-the-loop channel for `telegram-apply` ---
+    # Create a bot with @BotFather, put its token here (never in chat or code),
+    # message the bot once, then run `naukri-agent telegram-setup` to get the
+    # chat id. Only messages from that one chat are ever acted on.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_approval_timeout_minutes: int = 20  # waiting for the job's Yes/No
+    telegram_answer_timeout_minutes: int = 15  # waiting for each answer / final Yes
 
     # --- Database ---
     database_url: str = "sqlite:///./data/naukri_agent.db"

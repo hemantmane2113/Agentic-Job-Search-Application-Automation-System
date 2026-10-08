@@ -138,7 +138,7 @@ def _build_summary(
         for question, answer in rows:
             lines.append(f"  Q: {question.question_text}\n  A: {answer}")
     else:
-        lines.append("Answers: none (every question was skippable and skipped)")
+        lines.append("Answers: none (no question needed an answer)")
     return "\n".join(lines)
 
 

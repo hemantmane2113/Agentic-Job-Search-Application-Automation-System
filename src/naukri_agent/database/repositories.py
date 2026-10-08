@@ -916,3 +916,48 @@ def add_run_event(
     return row
 
 
+def _naive_utc(moment: "datetime.datetime") -> "datetime.datetime":
+    """SQLite hands back naive datetimes (stored as UTC); comparing them with an
+    aware one raises TypeError. Normalise to naive UTC before comparing."""
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(datetime.UTC).replace(tzinfo=None)
+    return moment
+
+
+def add_auto_apply_attempt(
+    session: Session, *, job_id: int, attempt_id: str, outcome: str, detail: str | None = None
+) -> "AutoApplyAttempt":
+    from naukri_agent.database.models import AutoApplyAttempt
+
+    row = AutoApplyAttempt(job_id=job_id, attempt_id=attempt_id, outcome=outcome, detail=detail)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def auto_apply_count_since(session: Session, since: "datetime.datetime") -> int:
+    """Attempts in the window that count toward the daily cap: applied, and
+    unconfirmed (it may well have gone through, so it must not be free)."""
+    from naukri_agent.database.models import AutoApplyAttempt
+
+    since = _naive_utc(since)
+    return (
+        session.query(AutoApplyAttempt)
+        .filter(AutoApplyAttempt.attempted_at >= since, AutoApplyAttempt.outcome.in_(("applied", "unconfirmed")))
+        .count()
+    )
+
+
+def auto_apply_job_ids_to_skip(session: Session, now: "datetime.datetime") -> set[int]:
+    """Jobs auto-apply must not touch again: anything attempted in the last 30
+    days (applied / needs_human / unconfirmed / not_native), except a plain
+    failure, which only blocks a retry for a day."""
+    from naukri_agent.database.models import AutoApplyAttempt
+
+    now = _naive_utc(now)
+    skip: set[int] = set()
+    for row in session.query(AutoApplyAttempt).filter(AutoApplyAttempt.attempted_at >= now - datetime.timedelta(days=30)):
+        if row.outcome in ("failed", "no_reply") and row.attempted_at < now - datetime.timedelta(days=1):
+            continue
+        skip.add(row.job_id)
+    return skip

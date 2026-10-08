@@ -383,7 +383,7 @@ class FakePage:
             raise self.fill_error
         self.filled[selector] = value
 
-    def click(self, selector: str) -> None:
+    def click(self, selector: str, **_kwargs: Any) -> None:
         self._check_conn()
         self.clicked.append(selector)
         if self.on_click is not None:
