@@ -42,6 +42,7 @@ class FakeClient:
         self.url = None
         self.opened, self.clicked, self.answered, self.submitted_urls, self.shots = [], [], [], [], []
         self.confirmed_urls = []
+        self.guessed_submit_calls = 0
 
     def open_job_page(self, url):
         self.url = url
@@ -79,10 +80,12 @@ class FakeClient:
 
     def confirm_application_after_answers(self, url):
         self.confirmed_urls.append(url)
+        self.submitted_urls.append(url)
         ok = self._p().get("submitted", True)
         return ApplySubmissionResult(submitted=ok, notes=["confirmed: test"] if ok else ["no confirmation"])
 
     def submit_application(self):
+        self.guessed_submit_calls += 1
         self.submitted_urls.append(self.url)
         ok = self._p().get("submitted", True)
         return ApplySubmissionResult(submitted=ok, notes=["confirmed: test"] if ok else ["no confirmation"])

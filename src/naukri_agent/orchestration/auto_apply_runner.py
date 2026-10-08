@@ -230,6 +230,7 @@ def run_auto_apply(
     now: datetime.datetime | None = None,
     send_summary: bool = True,
     interaction: Any = None,
+    max_attempts: int | None = None,
 ) -> AutoApplyRunResult:
     """interaction=None: unattended (profile answers only, anything else parks the
     job). interaction=<TelegramInteraction-like>: a human approves each job,
@@ -298,7 +299,7 @@ def run_auto_apply(
         return item
 
     shots = settings.inspection_output_dir / "auto_apply"
-    max_attempts = settings.auto_apply_daily_cap * 3
+    max_attempts = max_attempts or settings.auto_apply_daily_cap * 3  # --max-jobs caps this for test runs
 
     # Interactive mode: put the FIRST job on the phone before the browser even starts.
     # Launching, logging in and loading the page take ~10-15s; the user can already be
@@ -392,11 +393,13 @@ def run_auto_apply(
 
                     shots.mkdir(parents=True, exist_ok=True)
                     client.screenshot(shots / f"{attempt_id}_before_submit.png")
-                    if questions and all(q.options for q in questions):
-                        # choice questions: the panel's Save was the submit; confirm from Naukri's own state
-                        submission = client.confirm_application_after_answers(job["url"])
-                    else:
-                        submission = client.submit_application()
+                    # Every flow seen so far submits by itself: the Apply click for a question-free
+                    # job (jobs 352, 321) and the panel's Save for a choice question (374). None
+                    # needed the guessed "submit" button, and for question-free jobs the Applied
+                    # marker only shows after the job page is reloaded - the old 8s look-without-
+                    # reloading logged two finished applications as "unconfirmed". So always
+                    # confirm from Naukri's own page state (reloading once if needed).
+                    submission = client.confirm_application_after_answers(job["url"])
                     client.screenshot(shots / f"{attempt_id}_after_submit.png")
 
                     if not submission.submitted:

@@ -404,7 +404,9 @@ def telegram_setup(wait: int) -> None:
 
 
 @cli.command("telegram-apply")
-def telegram_apply() -> None:
+@click.option("--max-jobs", type=click.IntRange(min=1), default=None,
+              help="Offer at most this many jobs in this run (handy for testing).")
+def telegram_apply(max_jobs: int | None) -> None:
     """
     Apply to eligible jobs that have a plain Naukri Apply button, with YOU approving
     on Telegram: each job is sent to your phone and nothing is clicked until you tap
@@ -423,7 +425,7 @@ def telegram_apply() -> None:
     except ValueError as exc:
         raise click.ClickException(str(exc))
 
-    result = _explain_busy_database(lambda: run_auto_apply(settings, interaction=interaction))
+    result = _explain_busy_database(lambda: run_auto_apply(settings, interaction=interaction, max_attempts=max_jobs))
     if not result.blocked_reason:
         interaction.notify(
             f"Run finished: {result.applied} applied, {len(result.outcomes)} job(s) handled."

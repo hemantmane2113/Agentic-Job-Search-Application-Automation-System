@@ -341,15 +341,18 @@ def test_choice_answers_are_confirmed_from_naukris_state_not_a_guessed_submit_bu
     fake = FakeClient({urls["choice"]: {"questions": [_walkin()]}})
     r = go(c, factory, fake, FakeHuman(approvals=[True], answers=["Yes"], confirms=[True]))
     assert r.applied == 1
-    assert fake.confirmed_urls == [urls["choice"]] and fake.submitted_urls == []
+    assert fake.confirmed_urls == [urls["choice"]] and fake.guessed_submit_calls == 0
 
 
-def test_a_question_free_job_still_uses_the_apply_click_confirmation(tmp_path):
+def test_a_question_free_job_is_also_confirmed_from_naukris_state_not_a_guessed_button(tmp_path):
+    """Live (jobs 352, 321): the Apply click submits, but the Applied marker only shows after a
+    reload, so the old look-without-reloading logged two finished applications as unconfirmed."""
     c = cfg(tmp_path)
     factory, urls = seed(c, [("free", "040926004101", 90.0, {})])
     fake = FakeClient({urls["free"]: {}})
-    go(c, factory, fake, FakeHuman(approvals=[True]))
-    assert fake.submitted_urls == [urls["free"]] and fake.confirmed_urls == []
+    r = go(c, factory, fake, FakeHuman(approvals=[True]))
+    assert r.applied == 1
+    assert fake.confirmed_urls == [urls["free"]] and fake.guessed_submit_calls == 0
 
 
 def test_an_unproven_choice_answer_stops_the_run_and_records_nothing_as_applied(tmp_path):
@@ -465,3 +468,51 @@ def test_the_choice_prompt_says_a_tap_submits_immediately():
     w = World([[], [button("opt:0")]])
     interaction(w).ask_question(1, 1, "Walk-in?", None, options=["Yes", "No"])
     assert "submitted straight away" in w.sent()[0]["text"] and "no second confirmation" in w.sent()[0]["text"]
+
+
+# --- --max-jobs: limit a test run to a few jobs ----------------------------------------------------------
+
+
+def test_max_attempts_limits_how_many_jobs_are_offered_in_one_run(tmp_path):
+    from contextlib import contextmanager
+
+    from naukri_agent.orchestration.auto_apply_runner import run_auto_apply
+
+    from .test_auto_apply_runner import NOW
+
+    c = cfg(tmp_path, auto_apply_daily_cap=6)
+    factory, urls = seed(c, [(f"m{i}", f"04092600600{i}", 95.0 - i, {}) for i in range(4)])
+    fake = FakeClient({u: {} for u in urls.values()})
+
+    @contextmanager
+    def opener(_s):
+        yield fake
+
+    human = FakeHuman(approvals=[True] * 4)
+    r = run_auto_apply(c, session_factory=factory, open_client=opener, now=NOW, interaction=human, max_attempts=2)
+    assert r.applied == 2 and len(fake.opened) == 2 and len(human.asked) == 2
+
+
+def test_the_cli_passes_max_jobs_through(monkeypatch):
+    from click.testing import CliRunner
+
+    import naukri_agent.cli.main as cli_main
+    from naukri_agent.config import Settings
+    from naukri_agent.orchestration.auto_apply_runner import AutoApplyRunResult
+
+    seen = {}
+
+    class _Quiet:
+        def notify(self, text):
+            pass
+
+    def fake_run(settings, **kw):
+        seen.update(kw)
+        return AutoApplyRunResult()
+
+    monkeypatch.setattr(cli_main, "get_settings", lambda: Settings(_env_file=None, telegram_bot_token="t", telegram_chat_id="1"))
+    monkeypatch.setattr("naukri_agent.orchestration.auto_apply_runner.run_auto_apply", fake_run)
+    monkeypatch.setattr("naukri_agent.orchestration.telegram_interaction.build_telegram_interaction", lambda s, channel=None: _Quiet())
+    assert CliRunner().invoke(cli_main.cli, ["telegram-apply", "--max-jobs", "3"]).exit_code == 0
+    assert seen["max_attempts"] == 3
+    assert CliRunner().invoke(cli_main.cli, ["telegram-apply", "--max-jobs", "0"]).exit_code != 0  # must be >= 1
