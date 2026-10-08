@@ -44,6 +44,7 @@ from naukri_agent.browser.apply_type import (  # noqa: F401 - detect_apply_type 
     APPLY_TYPE_NATIVE,
     APPLY_TYPE_NONE,
     detect_apply_type,
+    is_marked_applied,
 )
 from naukri_agent.browser.models import ApplyQuestionPrompt, ApplySubmissionResult
 
@@ -58,6 +59,7 @@ _APPLY_INIT_ALLOWLIST: frozenset[tuple[str, str]] = frozenset({("POST", _APPLY_I
 _LIST_QUESTIONS_POLL_COUNT = 6
 _LIST_QUESTIONS_POLL_INTERVAL_MS = 500
 _APPLIED_POLL_COUNT = 12
+_APPLIED_MARKER_WAIT_MS = 8000
 _APPLIED_POLL_INTERVAL_MS = 1000
 _APPLIED_TEXT_RE = re.compile(r"applied|application (has been )?(sent|submitted)", re.I)
 
@@ -226,6 +228,15 @@ class ApplyWorkflowSession:
         self._page.click(selectors.APPLY_SKIP_BUTTON)
 
     def submit_application(self) -> ApplySubmissionResult:
+        # Live 2026-10-08 (job 352): when a job has no screening questions the Apply
+        # click ITSELF submits. Naukri then shows an "Applied" marker and there is no
+        # further submit button, so hunting for one just timed out and a real, finished
+        # application was logged as unconfirmed. Check for the marker first.
+        if is_marked_applied(self._page, wait_ms=_APPLIED_MARKER_WAIT_MS):
+            return ApplySubmissionResult(
+                submitted=True,
+                notes=["confirmed: Naukri shows the job as Applied (the Apply click itself submitted)"],
+            )
         try:
             # no_wait_after: a successful submit navigates away (seen live on
             # 2026-10-08: to /myapply/saveApply). Playwright's default wait for
@@ -253,6 +264,8 @@ class ApplyWorkflowSession:
         Naukri's /myapply/ result page, or the page text now says applied. Never raises."""
         for _ in range(_APPLIED_POLL_COUNT):
             try:
+                if is_marked_applied(self._page):
+                    return "page shows the Applied marker"
                 url = self._page.url or ""
                 if "/myapply/" in url:
                     return "page moved to Naukri's /myapply/ result page"

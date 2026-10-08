@@ -1,5 +1,6 @@
 """auto-apply CLI gate and the per-job capture reset that multi-job sessions need."""
 
+import pytest
 from click.testing import CliRunner
 
 import naukri_agent.cli.main as cli_main
@@ -62,3 +63,51 @@ def test_telegram_setup_needs_the_bot_token_first(monkeypatch):
     monkeypatch.setattr(cli_main, "get_settings", lambda: Settings(_env_file=None))
     result = CliRunner().invoke(cli_main.cli, ["telegram-setup"])
     assert result.exit_code != 0 and "TELEGRAM_BOT_TOKEN" in result.output
+
+
+# --- opening a job page right after login ---------------------------------------
+
+
+class _FlakyGotoPage:
+    def __init__(self, failures):
+        self.failures, self.calls, self.waits = failures, 0, 0
+
+    def goto(self, url):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise Exception("Page.goto: Navigation interrupted by another navigation")
+
+    def wait_for_timeout(self, ms):
+        self.waits += 1
+
+    def wait_for_load_state(self, *a, **k):
+        pass
+
+
+def test_open_job_page_retries_when_it_collides_with_the_post_login_redirect():
+    from unittest.mock import MagicMock
+
+    from naukri_agent.browser.naukri_client import NaukriClient
+
+    page = _FlakyGotoPage(failures=2)
+    NaukriClient(page, MagicMock()).open_job_page("https://www.naukri.com/job-1")
+    assert page.calls == 3 and page.waits == 2  # two collisions, then success
+
+
+def test_open_job_page_gives_up_after_three_attempts_with_the_real_error():
+    from unittest.mock import MagicMock
+
+    from naukri_agent.browser.naukri_client import NaukriClient
+
+    page = _FlakyGotoPage(failures=99)
+    with pytest.raises(Exception, match="Navigation interrupted"):
+        NaukriClient(page, MagicMock()).open_job_page("https://www.naukri.com/job-1")
+    assert page.calls == 3
+
+
+def test_failure_detail_includes_the_browser_message_but_other_errors_stay_type_only():
+    from naukri_agent.orchestration.auto_apply_runner import _describe_error
+
+    pw = type("Error", (Exception,), {"__module__": "playwright._impl._errors"})
+    assert _describe_error(pw("Page.goto: net::ERR_ABORTED\n  - navigating...")) == "Error: Page.goto: net::ERR_ABORTED"
+    assert _describe_error(RuntimeError("secret-ish detail")) == "RuntimeError"

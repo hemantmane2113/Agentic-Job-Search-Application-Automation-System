@@ -129,6 +129,13 @@ APPLY_BUTTON = "#apply-button, button[class*='apply']"  # UNVERIFIED (presence s
 # -- there is no Naukri application for `apply` to automate.
 COMPANY_SITE_APPLY_BUTTON = "#company-site-button"
 
+# VERIFIED 2026-10-08 (read-only look at two jobs applied to through this app,
+# jobs 352 and 358): once Naukri has registered an application, the job page
+# shows `<... id="already-applied">Applied</...>` in place of the Apply button.
+# Observed after the Apply click on jobs with no screening questions: that
+# click ITSELF submits, and there is no second submit button.
+ALREADY_APPLIED_MARKER = "#already-applied"
+
 # UNVERIFIED. The pre-click capture proved these controls do NOT exist
 # before Apply is clicked (empty `<div id="chatbot-container"></div>` is
 # the only apply-related mount point). Kept for Stage 1's read-only

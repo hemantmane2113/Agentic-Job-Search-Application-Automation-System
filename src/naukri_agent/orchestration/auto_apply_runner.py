@@ -132,6 +132,18 @@ def _open_naukri_client(settings: Settings) -> Iterator[Any]:
         yield client
 
 
+def _describe_error(exc: Exception) -> str:
+    """Error type, plus the first line of the message for browser (Playwright) errors
+    only: a bare "Error" says nothing, and those messages hold a page address, never
+    a credential. Every other exception stays type-only, as before."""
+    name = type(exc).__name__
+    if type(exc).__module__.startswith("playwright"):
+        first = (str(exc).splitlines() or [""])[0].strip()[:200]
+        if first:
+            return f"{name}: {first}"
+    return name
+
+
 def _status_line(o: AutoApplyOutcome) -> str | None:
     head = f"{o.title} - {o.company}"
     if o.outcome == "applied":
@@ -346,7 +358,7 @@ def run_auto_apply(
                         link_application_questions_to_history(s, attempt_id, history_id)
                     result.applied += 1
                 except Exception as exc:  # noqa: BLE001 - any surprise stops the whole run
-                    record(job, attempt_id, "failed", f"{type(exc).__name__}")
+                    record(job, attempt_id, "failed", _describe_error(exc))
                     result.stopped_reason = f"stopped after an error ({type(exc).__name__})"
                     break
     except Exception as exc:  # noqa: BLE001 - browser/login failure before or between jobs

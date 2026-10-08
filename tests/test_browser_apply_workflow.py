@@ -219,3 +219,44 @@ def test_discovery_stores_unknown_not_none_when_no_apply_control_was_seen():
     assert _known_apply_type(_DetectPage({})) is None
     assert _known_apply_type(_DetectPage({selectors.APPLY_BUTTON: [_Handle(True)]})) == "native"
     assert _known_apply_type(_DetectPage({selectors.COMPANY_SITE_APPLY_BUTTON: [_Handle(True)]})) == "company_site"
+
+
+# --- the "Applied" marker: for question-free jobs the Apply click itself submits ----
+
+
+class _MarkerPage(FakePage):
+    """FakePage whose Applied marker is visible now, or appears when waited for."""
+
+    def __init__(self, visible_now: bool = False, appears_on_wait: bool = False):
+        super().__init__()
+        self._visible = visible_now
+        self._appears = appears_on_wait
+
+    def query_selector_all(self, selector):
+        return [_Handle(True)] if (selector == selectors.ALREADY_APPLIED_MARKER and self._visible) else []
+
+    def wait_for_selector(self, selector, state=None, timeout=None):
+        if selector == selectors.ALREADY_APPLIED_MARKER and self._appears:
+            self._visible = True
+            return None
+        raise TimeoutError("not found")
+
+
+def test_applied_marker_already_showing_counts_as_submitted_without_clicking_anything_else():
+    page = _MarkerPage(visible_now=True)
+    result = ApplyWorkflowSession(page).submit_application()
+    assert result.submitted is True and "Applied" in result.notes[0]
+    assert page.clicked == []  # no hunt for a submit button that does not exist
+
+
+def test_applied_marker_that_appears_a_moment_later_is_waited_for():
+    page = _MarkerPage(appears_on_wait=True)
+    result = ApplyWorkflowSession(page).submit_application()
+    assert result.submitted is True and page.clicked == []
+
+
+def test_without_the_marker_the_old_submit_click_path_is_still_used():
+    page = _MarkerPage()
+    page.url = "https://www.naukri.com/myapply/saveApply?x=1"
+    result = ApplyWorkflowSession(page).submit_application()
+    assert page.clicked == [selectors.APPLY_FINAL_SUBMIT_BUTTON] and result.submitted is True

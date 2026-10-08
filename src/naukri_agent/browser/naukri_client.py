@@ -26,6 +26,10 @@ from naukri_agent.browser.models import (
 from naukri_agent.config import Settings
 
 
+_OPEN_JOB_ATTEMPTS = 3
+_OPEN_JOB_RETRY_WAIT_MS = 3000
+
+
 class NaukriClient(JobBoardClient):
     def __init__(self, page: Any, settings: Settings) -> None:
         super().__init__(page, settings)
@@ -101,7 +105,24 @@ class NaukriClient(JobBoardClient):
         # network guard is armed. Without this step click_apply() runs
         # against whatever page login() left behind (the Naukri homepage),
         # which has no Apply button.
-        self._page.goto(url)
+        # login() can return while Naukri's own post-login redirect is still in
+        # flight (seen live: address still /nlogin/login). A goto() that lands on
+        # top of it is aborted with a bare Playwright "Error", so let the redirect
+        # finish and retry a couple of times before giving up.
+        last_error: Exception | None = None
+        for _attempt in range(_OPEN_JOB_ATTEMPTS):
+            try:
+                self._page.goto(url)
+                last_error = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                try:
+                    self._page.wait_for_timeout(_OPEN_JOB_RETRY_WAIT_MS)
+                except Exception:  # noqa: BLE001
+                    pass
+        if last_error is not None:
+            raise last_error
         try:
             self._page.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:  # noqa: BLE001 - a slow settle must not abort; click_apply() has its own timeout

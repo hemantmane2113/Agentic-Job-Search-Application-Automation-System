@@ -25,6 +25,21 @@ def _any_visible(page: Any, selector: str) -> bool:
         return False
 
 
+def is_marked_applied(page: Any, wait_ms: int = 0) -> bool:
+    """True if the job page shows Naukri's "Applied" marker (the application is
+    registered). With wait_ms > 0, waits up to that long for it to appear, since
+    it is drawn a moment after the click. Never clicks or raises."""
+    if _any_visible(page, selectors.ALREADY_APPLIED_MARKER):
+        return True
+    if wait_ms > 0:
+        try:
+            page.wait_for_selector(selectors.ALREADY_APPLIED_MARKER, state="visible", timeout=wait_ms)
+            return True
+        except Exception:  # noqa: BLE001 - did not appear in time (or the page cannot wait)
+            return False
+    return False
+
+
 def detect_apply_type(page: Any) -> str:
     """
     Never clicks or fills. "native" if a visible Naukri Apply button
