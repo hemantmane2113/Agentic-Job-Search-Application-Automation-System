@@ -93,5 +93,6 @@ class RecommendationDigest(BaseModel):
     # Part 2 = `applied_via_agent`. Off by default so the original single-list layout and
     # its tests are untouched.
     two_part: bool = False
+    profile_refresh_note: str | None = None  # what the day's first step (profile refresh) did
     native_waiting: int = 0  # eligible jobs with a Naukri Apply button, left for telegram-apply
     applied_via_agent: list[AppliedViaAgent] = Field(default_factory=list)

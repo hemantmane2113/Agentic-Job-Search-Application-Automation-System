@@ -69,6 +69,45 @@ class DailyRunResult(BaseModel):
     notes: list[str] = []
 
 
+def _refresh_note(result) -> str | None:
+    """One line for the email, or None when there is nothing worth saying."""
+    outcome, rid = result.outcome, result.resume_id
+    if outcome == "uploaded":
+        return f"Profile refreshed: uploaded {rid} (Naukri shows {result.after_filename})."
+    if outcome == "already_done":
+        return f"Profile already refreshed today ({rid})."
+    if outcome == "unconfirmed":
+        return f"Profile refresh: uploaded {rid} but Naukri did not show it afterwards - please check your profile."
+    if outcome == "needs_human":
+        return "Profile refresh skipped: Naukri asked for a CAPTCHA/OTP. Nothing was changed."
+    if outcome == "failed":
+        return f"Profile refresh failed ({result.detail or 'unknown error'}). Nothing was changed."
+    if outcome == "paused":
+        return "Profile refresh is paused (pause file present)."
+    return None  # disabled / nothing_to_do
+
+
+def _refresh_profile_first(settings, session_factory, now, refresh_fn) -> str | None:
+    try:
+        if refresh_fn is None:
+            from naukri_agent.orchestration.profile_refresh import run_profile_refresh
+
+            notify = None
+            if settings.profile_refresh_enabled and settings.telegram_bot_token and settings.telegram_chat_id:
+                from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
+
+                notify = build_telegram_interaction(settings).notify
+            result = run_profile_refresh(
+                settings, execute=True, session_factory=session_factory, now=now, notify=notify
+            )
+        else:
+            result = refresh_fn(settings, session_factory, now)
+        return _refresh_note(result)
+    except Exception as exc:  # noqa: BLE001 - the job search must go on whatever happened here
+        logger.warning("profile refresh step crashed: %s", type(exc).__name__)
+        return f"Profile refresh failed ({type(exc).__name__}). Nothing was changed."
+
+
 def _default_discover(session, profile, settings, run_id, seq):
     """Real discovery: launch the browser, log in (CAPTCHA/MFA stays
     human-in-the-loop), search + fetch details. Not exercised by unit
@@ -105,11 +144,18 @@ def run_daily_recommendations(
     extraction_provider=None,
     explain_provider=None,
     session_factory=None,
+    profile_refresh_fn=None,
 ) -> DailyRunResult:
     settings = settings or get_settings()
     now = now or datetime.datetime.now(datetime.UTC)
     discover_fn = discover_fn or _default_discover
     session_factory = session_factory or init_db(settings)
+
+    # FIRST STEP of the day: refresh the Naukri profile (upload the next resume in rotation) so it
+    # is fresh before anything else happens. Off unless PROFILE_REFRESH_ENABLED=true. It runs before
+    # the run record / long DB transaction below, and whatever happens it can never stop the job
+    # search: any failure is reduced to a one-line note in the email.
+    refresh_note = _refresh_profile_first(settings, session_factory, now, profile_refresh_fn)
 
     with session_scope(session_factory) as session:
         profile = load_candidate_profile(settings.candidate_profile_path)
@@ -302,6 +348,7 @@ def run_daily_recommendations(
             session, previous_digest_time(session, run_id, now)
         )
         digest.notes.extend(notes)
+        digest.profile_refresh_note = refresh_note
         seq += 1
         add_run_event(session, daily_run_id=run_id, seq=seq, stage="build_digest",
                       status=RunEventStatus.OK,

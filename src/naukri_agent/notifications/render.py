@@ -126,7 +126,10 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
     else:
         part2.append("Nothing was applied via Telegram since the last digest.")
 
-    sections = [f"Daily Naukri job digest — {date_str}", "\n".join(part1)]
+    sections = [f"Daily Naukri job digest — {date_str}"]
+    if digest.profile_refresh_note:
+        sections.append(digest.profile_refresh_note)
+    sections.append("\n".join(part1))
     sections += [_block(r) for r in digest.recommendations]
     sections.append("\n".join(part2))
     if digest.native_waiting:
