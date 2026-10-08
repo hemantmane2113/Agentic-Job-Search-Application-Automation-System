@@ -54,13 +54,25 @@ logger = logging.getLogger(__name__)
 # here as DATA, not logic, so that frozen module never needs to change
 # to expose it. See this module's docstring.
 _APPLY_INIT_PATH = "/cloudgateway-workflow/workflow-services/apply-workflow/v1/apply"
-_APPLY_INIT_ALLOWLIST: frozenset[tuple[str, str]] = frozenset({("POST", _APPLY_INIT_PATH)})
+# Observed live 2026-10-08 (job 374): when the user picks an answer and the panel's
+# Save is pressed, Naukri's chatbot sends the answer to this exact endpoint. With only
+# the apply-init request allowed, the network guard BLOCKED it and the panel showed
+# "Something went wrong", so no answer could ever be submitted. It is allowed by exact
+# (method, path) like apply-init: the guard stays default-deny for everything else, and
+# this request is only ever triggered by our own Save click, which the runner makes
+# only AFTER the human has approved the job, answered, and confirmed.
+_CHATBOT_RESPOND_PATH = "/cloudgateway-chatbot/chatbot-services/botapi/v5/respond"
+_APPLY_INIT_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
+    {("POST", _APPLY_INIT_PATH), ("POST", _CHATBOT_RESPOND_PATH)}
+)
 
 _LIST_QUESTIONS_POLL_COUNT = 6
 _LIST_QUESTIONS_POLL_INTERVAL_MS = 500
 _APPLIED_POLL_COUNT = 12
 _APPLIED_MARKER_WAIT_MS = 8000
 _CHOICE_POLL_COUNT = 10
+_FINAL_SUBMIT_CLICK_TIMEOUT_MS = 5000
+_APPLIED_QUICK_WAIT_MS = 4000
 _APPLIED_POLL_INTERVAL_MS = 1000
 _APPLIED_TEXT_RE = re.compile(r"applied|application (has been )?(sent|submitted)", re.I)
 
@@ -300,7 +312,9 @@ class ApplyWorkflowSession:
             # 2026-10-08: to /myapply/saveApply). Playwright's default wait for
             # that navigation to settle timed out and crashed AFTER the
             # application had already been sent, so nothing got recorded.
-            self._page.click(selectors.APPLY_FINAL_SUBMIT_BUTTON, no_wait_after=True)
+            self._page.click(
+                selectors.APPLY_FINAL_SUBMIT_BUTTON, no_wait_after=True, timeout=_FINAL_SUBMIT_CLICK_TIMEOUT_MS
+            )
         except Exception as exc:  # noqa: BLE001
             return ApplySubmissionResult(
                 submitted=False,
@@ -315,6 +329,31 @@ class ApplyWorkflowSession:
         return ApplySubmissionResult(
             submitted=False,
             notes=["clicked, but no confirmation was seen; verify on Naukri before trying again"],
+        )
+
+    def confirm_applied_after_save(self, job_url: str) -> ApplySubmissionResult:
+        """For choice (radio) questions the panel's Save IS the submit; there is no
+        separate submit button to find. The live run that proved this lost ~36s waiting
+        for one that does not exist, then logged a finished application as unconfirmed.
+        Instead ask Naukri itself: is the job now marked Applied? Look at the page as
+        it is; if not yet, reload the job page once (the panel closes and the page
+        redraws) and look again. Never clicks anything."""
+        if is_marked_applied(self._page, wait_ms=_APPLIED_QUICK_WAIT_MS):
+            return ApplySubmissionResult(submitted=True, notes=["confirmed: Naukri shows the job as Applied"])
+        try:
+            self._page.goto(job_url)
+        except Exception as exc:  # noqa: BLE001
+            return ApplySubmissionResult(
+                submitted=False,
+                notes=[f"answer saved, but the job page could not be reloaded to check ({type(exc).__name__}); verify on Naukri"],
+            )
+        if is_marked_applied(self._page, wait_ms=_APPLIED_MARKER_WAIT_MS):
+            return ApplySubmissionResult(
+                submitted=True, notes=["confirmed: Naukri shows the job as Applied (after reloading the job page)"]
+            )
+        return ApplySubmissionResult(
+            submitted=False,
+            notes=["answer saved, but Naukri's page does not show Applied; verify on Naukri before trying again"],
         )
 
     def _wait_for_applied_signal(self) -> str | None:

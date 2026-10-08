@@ -147,6 +147,9 @@ class NaukriClient(JobBoardClient):
         except Exception:  # noqa: BLE001 - a missing screenshot must never fail an application
             return False
 
+    def confirm_application_after_answers(self, job_url: str) -> ApplySubmissionResult:
+        return self._get_apply_session().confirm_applied_after_save(job_url)
+
     def question_panel_open(self) -> bool:
         from naukri_agent.browser.apply_type import question_panel_open
 

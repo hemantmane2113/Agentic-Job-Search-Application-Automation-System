@@ -175,13 +175,16 @@ def _describe_error(exc: Exception) -> str:
 def _status_line(o: AutoApplyOutcome) -> str | None:
     head = f"{o.title} - {o.company}"
     if o.outcome == "applied":
-        return f"Applied: {head}"
+        sent = "".join(f"\nQ: {q}\nA: {a}" for q, a in zip(o.questions, o.answers))
+        return f"Applied: {head}" + (f"\n\nAnswers sent:{sent}" if sent else "")
     if o.outcome == PARKED_NEEDS_HUMAN:
         return f"NOT submitted - please finish this one yourself:\n{head}\n{o.url}\nWhy: {o.detail}"
     if o.outcome == "unconfirmed":
         return f"Could not confirm this application - check Naukri before anything else:\n{head}\n{o.url}"
     if o.outcome == "failed":
         return f"An error stopped the run on: {head} ({o.detail}). Nothing further was done."
+    if o.outcome == "not_native":
+        return f"Skipped - this job no longer has a Naukri Apply button, so ignore the question above: {head}"
     return None
 
 
@@ -296,6 +299,15 @@ def run_auto_apply(
 
     shots = settings.inspection_output_dir / "auto_apply"
     max_attempts = settings.auto_apply_daily_cap * 3
+
+    # Interactive mode: put the FIRST job on the phone before the browser even starts.
+    # Launching, logging in and loading the page take ~10-15s; the user can already be
+    # reading and tapping meanwhile (Telegram keeps the reply until we read it).
+    pre_sent = None
+    if interaction is not None:
+        first = {**candidates[0], "your_years": candidate.years_experience}
+        interaction.send_approval(first)
+        pre_sent = first["job_id"]
     try:
         with (open_client or _open_naukri_client)(settings) as client:
             for job in candidates[:max_attempts]:
@@ -304,6 +316,8 @@ def run_auto_apply(
                     result.stopped_reason = "daily cap reached"
                     break
                 attempt_id = uuid.uuid4().hex
+                if interaction is not None and job["job_id"] != pre_sent:
+                    interaction.send_approval(job)  # asked while the page loads, not after
                 try:
                     client.open_job_page(job["url"])
                     if client.detect_apply_type() != "native":
@@ -311,7 +325,7 @@ def run_auto_apply(
                         continue
 
                     if interaction is not None:
-                        approved = interaction.approve_job(job)
+                        approved = interaction.wait_approval()
                         if approved is None:
                             record(job, attempt_id, "no_reply", "no reply on Telegram in time")
                             result.stopped_reason = "no reply on Telegram; stopped (silence is never a yes)"
@@ -323,7 +337,7 @@ def run_auto_apply(
                     client.prepare_next_application()
                     client.click_apply()
                     questions = client.list_questions()
-                    fields = client.application_question_field_count()
+                    fields = client.application_question_field_count() if not questions else 0
 
                     texts = [q.question_text for q in questions]
                     answers = [answer_from_profile(t, candidate, experience) for t in texts]
@@ -363,7 +377,10 @@ def run_auto_apply(
                             record(job, attempt_id, PARKED_NEEDS_HUMAN,
                                    "no answer was given on Telegram", texts, final_answers)
                             continue
-                        if questions:
+                        # A tap on a choice button IS the confirmation (the prompt says so), so
+                        # no second Yes/No. Typed answers still get one: a typo is easy to make
+                        # on a phone and impossible to take back.
+                        if questions and not all(q.options for q in questions):
                             confirmed = interaction.confirm_submit(job, texts, final_answers)
                             if not confirmed:
                                 record(job, attempt_id, "declined" if confirmed is False else "no_reply",
@@ -375,7 +392,11 @@ def run_auto_apply(
 
                     shots.mkdir(parents=True, exist_ok=True)
                     client.screenshot(shots / f"{attempt_id}_before_submit.png")
-                    submission = client.submit_application()
+                    if questions and all(q.options for q in questions):
+                        # choice questions: the panel's Save was the submit; confirm from Naukri's own state
+                        submission = client.confirm_application_after_answers(job["url"])
+                    else:
+                        submission = client.submit_application()
                     client.screenshot(shots / f"{attempt_id}_after_submit.png")
 
                     if not submission.submitted:
@@ -400,6 +421,8 @@ def run_auto_apply(
                     break
     except Exception as exc:  # noqa: BLE001 - browser/login failure before or between jobs
         result.stopped_reason = result.stopped_reason or f"could not run ({type(exc).__name__})"
+        if interaction is not None and pre_sent is not None and not result.outcomes:
+            interaction.notify(f"The run could not start ({type(exc).__name__}); please ignore the job question above.")
 
     if send_summary and (result.outcomes or result.stopped_reason):
         from naukri_agent.notifications.email import EmailMessage, build_email_sender

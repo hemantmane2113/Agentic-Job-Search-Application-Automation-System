@@ -19,10 +19,18 @@ class FakeHuman:
         self.approvals, self.answers, self.confirms = list(approvals), list(answers), list(confirms)
         self.asked, self.suggestions, self.confirmed_with, self.notes = [], [], [], []
         self.options_seen = []
+        self.events = []
+
+    def send_approval(self, job):
+        self.asked.append(job["title"])
+        self.events.append(("prompt", job["title"]))
+
+    def wait_approval(self):
+        return self.approvals.pop(0) if self.approvals else None
 
     def approve_job(self, job):
-        self.asked.append(job["title"])
-        return self.approvals.pop(0) if self.approvals else None
+        self.send_approval(job)
+        return self.wait_approval()
 
     def ask_question(self, index, total, text, suggestion, options=None):
         self.suggestions.append(suggestion)

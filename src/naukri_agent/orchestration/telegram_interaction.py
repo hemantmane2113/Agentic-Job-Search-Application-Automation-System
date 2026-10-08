@@ -78,8 +78,16 @@ class TelegramInteraction:
         self._approve_s = settings.telegram_approval_timeout_minutes * 60
         self._answer_s = settings.telegram_answer_timeout_minutes * 60
 
+    def send_approval(self, job: dict) -> None:
+        """Put the job on the phone NOW; the answer is read later by wait_approval()."""
+        self._ch.send_yes_no(format_job_card(job))
+
+    def wait_approval(self) -> bool | None:
+        return self._ch.wait_yes_no(self._approve_s)
+
     def approve_job(self, job: dict) -> bool | None:
-        return self._ch.ask_yes_no(format_job_card(job), self._approve_s)
+        self.send_approval(job)
+        return self.wait_approval()
 
     def ask_question(
         self, index: int, total: int, text: str, suggestion: str | None, options: list[str] | None = None
@@ -87,7 +95,7 @@ class TelegramInteraction:
         if options:  # a choice question: tap one of the offered answers
             hint = f"\n\nFrom your profile I'd answer: {suggestion}" if suggestion in options else ""
             reply = self._ch.ask_choice(
-                f"Question {index}/{total}:\n{text}{hint}\n\nTap an answer (or send {STOP_WORD} to give up on this job).",
+                f"Question {index}/{total}:\n{text}{hint}\n\nTap an answer - it is submitted straight away, there is no second confirmation. (Send {STOP_WORD} to give up on this job.)",
                 list(options),
                 self._answer_s,
             )

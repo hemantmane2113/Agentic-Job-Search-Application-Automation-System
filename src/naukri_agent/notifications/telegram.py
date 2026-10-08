@@ -145,9 +145,18 @@ class TelegramChannel:
         return None
 
     def ask_yes_no(self, text: str, timeout_s: float) -> bool | None:
-        """True / False, or None if no clear answer arrived in time."""
+        self.send_yes_no(text)
+        return self.wait_yes_no(timeout_s)
+
+    def send_yes_no(self, text: str) -> None:
+        """Ask now; read the answer later with wait_yes_no(). Anything already waiting is
+        discarded first, so an old reply can never answer this prompt. Replies sent while
+        the caller is busy are kept by Telegram and are read as soon as wait_yes_no() runs."""
         self.drain()
         self.send(text, yes_no=True)
+
+    def wait_yes_no(self, timeout_s: float) -> bool | None:
+        """True / False, or None if no clear answer arrived in time."""
         warned = []
 
         def accept(kind: str, value: str) -> bool | None:

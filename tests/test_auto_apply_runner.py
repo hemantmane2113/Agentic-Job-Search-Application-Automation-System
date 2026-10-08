@@ -41,6 +41,7 @@ class FakeClient:
         self.pages = pages
         self.url = None
         self.opened, self.clicked, self.answered, self.submitted_urls, self.shots = [], [], [], [], []
+        self.confirmed_urls = []
 
     def open_job_page(self, url):
         self.url = url
@@ -75,6 +76,11 @@ class FakeClient:
     def screenshot(self, path):
         self.shots.append(str(path))
         return True
+
+    def confirm_application_after_answers(self, url):
+        self.confirmed_urls.append(url)
+        ok = self._p().get("submitted", True)
+        return ApplySubmissionResult(submitted=ok, notes=["confirmed: test"] if ok else ["no confirmation"])
 
     def submit_application(self):
         self.submitted_urls.append(self.url)
@@ -373,8 +379,10 @@ def test_the_approval_prompt_receives_the_candidates_years_so_the_phone_can_comp
     seen = []
 
     class Spy(FakeHuman):
-        def approve_job(self, job):
+        def send_approval(self, job):
             seen.append(job.get("your_years"))
+
+        def wait_approval(self):
             return False
 
     go(c, factory, FakeClient({urls["yrs"]: {}}), Spy())

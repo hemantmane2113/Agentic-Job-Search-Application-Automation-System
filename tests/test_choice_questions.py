@@ -248,3 +248,220 @@ def test_an_open_question_panel_with_unreadable_questions_is_never_submitted(tmp
     with session_scope(factory) as s:
         assert s.query(ApplicationHistory).count() == 0
         assert s.query(AutoApplyAttempt).one().outcome == "needs_human"
+
+
+# --- the network guard must let the answer through (live finding, job 374) -------------------
+
+
+def test_the_guard_allows_exactly_apply_init_and_the_chatbot_answer_post_and_nothing_else():
+    """Live: the answer POST was blocked by the default-deny guard and Naukri's panel
+    said "Something went wrong". Only these two exact (method, path) pairs may pass."""
+    from naukri_agent.browser import apply_workflow as aw
+
+    assert aw._APPLY_INIT_ALLOWLIST == frozenset({
+        ("POST", "/cloudgateway-workflow/workflow-services/apply-workflow/v1/apply"),
+        ("POST", "/cloudgateway-chatbot/chatbot-services/botapi/v5/respond"),
+    })
+    # tracking, follow-company and every other mutation stays blocked
+    assert ("POST", "/cloudgateway-mynaukri/jobseeker-follow-services/v0/companygroups/1/followers/self") not in aw._APPLY_INIT_ALLOWLIST
+    assert ("GET", "/cloudgateway-chatbot/chatbot-services/botapi/v5/respond") not in aw._APPLY_INIT_ALLOWLIST
+
+
+def test_the_session_arms_the_blocker_with_that_allowlist():
+    from naukri_agent.browser import apply_workflow as aw
+
+    session = ApplyWorkflowSession(FakePage())
+    assert session._blocker._allow_exact == aw._APPLY_INIT_ALLOWLIST
+
+
+# --- latency fixes (live run: 36s of dead time after the answer was accepted) ----------------------
+
+
+class _ReloadPage(_MarkerPage):
+    """The Applied marker shows now, only after the job page is reloaded, or never."""
+
+    def __init__(self, applied_now=False, applied_after_reload=False, goto_raises=False):
+        super().__init__(drawer=False)
+        self.applied = applied_now
+        self._after_reload, self._goto_raises = applied_after_reload, goto_raises
+        self.goto_urls, self.clicked = [], []
+
+    def click(self, selector, **kwargs):
+        self.clicked.append(selector)
+
+    def goto(self, url):
+        self.goto_urls.append(url)
+        if self._goto_raises:
+            raise RuntimeError("net::ERR_ABORTED")
+        if self._after_reload:
+            self.applied = True
+
+
+JOB_URL = "https://www.naukri.com/job-listings-x-1"
+
+
+def test_choice_answer_is_confirmed_at_once_when_the_job_already_shows_applied():
+    page = _ReloadPage(applied_now=True)
+    result = ApplyWorkflowSession(page).confirm_applied_after_save(JOB_URL)
+    assert result.submitted is True and page.goto_urls == [] and page.clicked == []
+
+
+def test_choice_answer_is_confirmed_after_one_reload_of_the_job_page():
+    page = _ReloadPage(applied_after_reload=True)
+    result = ApplyWorkflowSession(page).confirm_applied_after_save(JOB_URL)
+    assert result.submitted is True and page.goto_urls == [JOB_URL] and "reloading" in result.notes[0]
+    assert page.clicked == []  # never hunts for a button that does not exist
+
+
+def test_choice_answer_without_any_applied_proof_is_unsubmitted_not_assumed():
+    page = _ReloadPage()
+    result = ApplyWorkflowSession(page).confirm_applied_after_save(JOB_URL)
+    assert result.submitted is False and "verify on Naukri" in result.notes[0]
+
+
+def test_a_failed_reload_is_reported_not_raised():
+    result = ApplyWorkflowSession(_ReloadPage(goto_raises=True)).confirm_applied_after_save(JOB_URL)
+    assert result.submitted is False and "could not be reloaded" in result.notes[0]
+
+
+def test_the_guessed_final_submit_click_no_longer_waits_30_seconds():
+    class _Recorder(FakePage):
+        def click(self, selector, **kwargs):
+            self.kw = kwargs
+            self.clicked.append(selector)
+
+    page = _Recorder()
+    ApplyWorkflowSession(page).submit_application()
+    assert page.kw["timeout"] == 5000 and page.kw["no_wait_after"] is True
+
+
+def test_choice_answers_are_confirmed_from_naukris_state_not_a_guessed_submit_button(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("choice", "040926004001", 90.0, {})])
+    fake = FakeClient({urls["choice"]: {"questions": [_walkin()]}})
+    r = go(c, factory, fake, FakeHuman(approvals=[True], answers=["Yes"], confirms=[True]))
+    assert r.applied == 1
+    assert fake.confirmed_urls == [urls["choice"]] and fake.submitted_urls == []
+
+
+def test_a_question_free_job_still_uses_the_apply_click_confirmation(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("free", "040926004101", 90.0, {})])
+    fake = FakeClient({urls["free"]: {}})
+    go(c, factory, fake, FakeHuman(approvals=[True]))
+    assert fake.submitted_urls == [urls["free"]] and fake.confirmed_urls == []
+
+
+def test_an_unproven_choice_answer_stops_the_run_and_records_nothing_as_applied(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("u1", "040926004201", 95.0, {}), ("u2", "040926004202", 90.0, {})])
+    fake = FakeClient({urls["u1"]: {"questions": [_walkin()], "submitted": False}, urls["u2"]: {}})
+    r = go(c, factory, fake, FakeHuman(approvals=[True, True], answers=["Yes"], confirms=[True]))
+    assert r.outcomes[0].outcome == "unconfirmed" and fake.opened == [urls["u1"]]
+    with session_scope(factory) as s:
+        assert s.query(ApplicationHistory).count() == 0
+
+
+def test_the_phone_is_asked_before_the_browser_starts_and_before_each_page_opens(tmp_path):
+    from contextlib import contextmanager
+
+    from naukri_agent.orchestration.auto_apply_runner import run_auto_apply
+
+    from .test_auto_apply_runner import NOW
+
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("first", "040926004301", 95.0, {}), ("second", "040926004302", 90.0, {})])
+    order = []
+    fake = FakeClient({u: {} for u in urls.values()})
+    real_open = fake.open_job_page
+    fake.open_job_page = lambda url: (order.append("page"), real_open(url))[1]
+
+    class Spy(FakeHuman):
+        def send_approval(self, job):
+            order.append("prompt:" + job["title"])
+            super().send_approval(job)
+
+    @contextmanager
+    def tracing_opener(_settings):
+        order.append("browser")
+        yield fake
+
+    run_auto_apply(c, session_factory=factory, open_client=tracing_opener, now=NOW,
+                   interaction=Spy(approvals=[True, True]))
+    assert order == ["prompt:first role", "browser", "page", "prompt:second role", "page"]
+
+
+def test_a_job_that_lost_its_apply_button_tells_the_phone_to_ignore_the_pending_question(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("gone", "040926004401", 90.0, {})])
+    human = FakeHuman(approvals=[True])
+    go(c, factory, FakeClient({urls["gone"]: {"type": "company_site"}}), human)
+    assert any("no longer has a Naukri Apply button" in n and "ignore the question above" in n for n in human.notes)
+
+
+def test_the_page_scan_for_input_fields_is_skipped_when_the_questions_were_already_read(tmp_path):
+    class NoScan(FakeClient):
+        def application_question_field_count(self):
+            raise AssertionError("scanning for input fields is wasted time when questions were parsed")
+
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("scan", "040926004501", 90.0, {})])
+    fake = NoScan({urls["scan"]: {"questions": [_walkin()]}})
+    r = go(c, factory, fake, FakeHuman(approvals=[True], answers=["Yes"], confirms=[True]))
+    assert r.applied == 1
+
+
+def test_telegram_prompt_can_be_sent_now_and_read_later_and_an_early_tap_is_kept():
+    w = World([[], [button("y")]])  # drain finds nothing; the tap arrives while we were busy
+    ch = w.channel()
+    ch.send_yes_no("Apply?")
+    assert len(w.sent()) == 1  # the prompt is already out
+    assert ch.wait_yes_no(60) is True
+
+
+# --- no second confirmation for tap-only (choice) answers --------------------------------------------
+
+
+def test_tapping_a_choice_answer_is_the_confirmation_and_no_second_prompt_is_sent(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("tap", "040926005001", 90.0, {})])
+    fake = FakeClient({urls["tap"]: {"questions": [_walkin()]}})
+    human = FakeHuman(approvals=[True], answers=["Yes"], confirms=[])  # a second prompt would get silence -> no_reply
+    r = go(c, factory, fake, human)
+    assert r.applied == 1 and human.confirmed_with == []
+    assert fake.answered == [(urls["tap"], "51822330", "Yes")]
+
+
+def test_the_applied_message_lists_the_answers_that_were_sent(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("msg", "040926005101", 90.0, {})])
+    human = FakeHuman(approvals=[True], answers=["No"])
+    go(c, factory, FakeClient({urls["msg"]: {"questions": [_walkin()]}}), human)
+    applied = [n for n in human.notes if n.startswith("Applied:")]
+    assert len(applied) == 1
+    assert "Q: Will you be available for the Walk-in interview in Chennai?" in applied[0] and "A: No" in applied[0]
+
+
+def test_typed_answers_and_mixed_questions_still_get_the_final_confirmation(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("typed", "040926005201", 95.0, {}), ("mixed", "040926005202", 90.0, {})])
+    typed = ApplyQuestionPrompt(control_id="t1", question_text="What is your notice period?")  # no options: typed
+    fake = FakeClient({urls["typed"]: {"questions": [typed]}, urls["mixed"]: {"questions": [_walkin(), typed]}})
+    human = FakeHuman(approvals=[True, True], answers=["Immediate", "Yes", "Immediate"], confirms=[True, True])
+    r = go(c, factory, fake, human)
+    assert r.applied == 2 and len(human.confirmed_with) == 2  # both were asked to confirm
+
+
+def test_a_declined_typed_confirmation_still_blocks_the_submit(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("no", "040926005301", 90.0, {})])
+    typed = ApplyQuestionPrompt(control_id="t1", question_text="What is your notice period?")
+    fake = FakeClient({urls["no"]: {"questions": [typed]}})
+    r = go(c, factory, fake, FakeHuman(approvals=[True], answers=["Immediate"], confirms=[False]))
+    assert r.outcomes[0].outcome == "declined" and fake.answered == [] and fake.submitted_urls == []
+
+
+def test_the_choice_prompt_says_a_tap_submits_immediately():
+    w = World([[], [button("opt:0")]])
+    interaction(w).ask_question(1, 1, "Walk-in?", None, options=["Yes", "No"])
+    assert "submitted straight away" in w.sent()[0]["text"] and "no second confirmation" in w.sent()[0]["text"]
