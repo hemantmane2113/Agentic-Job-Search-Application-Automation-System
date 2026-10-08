@@ -751,3 +751,25 @@ class AutoApplyAttempt(Base):
     attempted_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
     )
+
+
+class ResumeRefresh(Base):
+    """
+    One row per daily profile-refresh attempt (`profile-refresh --execute`). It is the
+    rotation's memory: the next resume is the one after the last `uploaded` row, and a
+    day with an `uploaded` row is done. `unconfirmed`/`failed`/`needs_human` never
+    advance the rotation. Not consulted by scoring or recommendation.
+
+    outcome: "uploaded" | "unconfirmed" | "failed" | "needs_human"
+    """
+
+    __tablename__ = "resume_refreshes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempted_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )

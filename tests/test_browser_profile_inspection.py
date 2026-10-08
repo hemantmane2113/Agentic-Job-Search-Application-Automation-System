@@ -119,3 +119,59 @@ def test_module_never_calls_a_mutating_page_method():
     assert ".click(" not in src
     assert ".check(" not in src
     assert ".select_option(" not in src
+
+
+# --- manual-open capture: the person opens the edit panel, the tool only reads it --------------------------------
+
+
+class _Ctx:
+    def __init__(self):
+        self.handler = None
+        self.listeners = []
+
+    def route(self, pattern, handler):
+        self.handler = handler
+
+    def on(self, event, handler):
+        self.listeners.append(event)
+
+
+def test_manual_open_step_prompts_reads_the_panel_and_installs_a_default_deny_guard(tmp_path, monkeypatch):
+    manager = FakeBrowserManager(_settings(tmp_path))
+    manager.context = _Ctx()
+    _clear_login_and_succeed(manager.page)
+    _patch_browser_manager(monkeypatch, manager)
+    prompts = []
+    report = run_profile_edit_inspection(
+        _settings(tmp_path), wait_for_manual_completion=prompts.append, capture_after_manual_open=True
+    )
+    assert report["completed"] is True
+    assert len(prompts) == 1 and "pencil" in prompts[0] and "Do NOT change" in prompts[0]
+    assert [s["step"] for s in report["steps"]][-2:] == ["profile_edit_ui", "profile_edit_ui_after_manual_open"]
+    assert manager.context.handler is not None  # the guard is installed
+    assert report["blocked_mutating_requests"]["count"] == 0
+    assert (tmp_path / "inspection_output").exists()
+
+
+def test_manual_open_is_off_by_default_so_the_original_behaviour_is_unchanged(tmp_path, monkeypatch):
+    manager = FakeBrowserManager(_settings(tmp_path))
+    _clear_login_and_succeed(manager.page)
+    _patch_browser_manager(monkeypatch, manager)
+    prompts = []
+    report = run_profile_edit_inspection(_settings(tmp_path), wait_for_manual_completion=prompts.append)
+    assert report["completed"] is True and prompts == [] and "blocked_mutating_requests" not in report
+
+
+def test_missing_interactive_terminal_is_reported_not_raised(tmp_path, monkeypatch):
+    manager = FakeBrowserManager(_settings(tmp_path))
+    manager.context = _Ctx()
+    _clear_login_and_succeed(manager.page)
+    _patch_browser_manager(monkeypatch, manager)
+
+    def no_stdin(_p):
+        raise EOFError
+
+    report = run_profile_edit_inspection(
+        _settings(tmp_path), wait_for_manual_completion=no_stdin, capture_after_manual_open=True
+    )
+    assert report["completed"] is False and report["error_type"] == "EOFError"

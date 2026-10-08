@@ -961,3 +961,29 @@ def auto_apply_job_ids_to_skip(session: Session, now: "datetime.datetime") -> se
             continue
         skip.add(row.job_id)
     return skip
+
+
+def add_resume_refresh(
+    session: Session, *, resume_id: str, outcome: str, file_hash: str | None = None, detail: str | None = None,
+    attempted_at: "datetime.datetime | None" = None,
+):
+    from naukri_agent.database.models import ResumeRefresh
+
+    row = ResumeRefresh(resume_id=resume_id, outcome=outcome, file_hash=file_hash, detail=detail)
+    if attempted_at is not None:
+        row.attempted_at = _naive_utc(attempted_at)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def last_uploaded_resume(session: Session):
+    """The most recent ResumeRefresh row that really uploaded, or None."""
+    from naukri_agent.database.models import ResumeRefresh
+
+    return (
+        session.query(ResumeRefresh)
+        .filter(ResumeRefresh.outcome == "uploaded")
+        .order_by(ResumeRefresh.id.desc())
+        .first()
+    )

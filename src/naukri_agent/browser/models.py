@@ -36,6 +36,17 @@ class ResumeState(BaseModel):
     remove_control_present: bool = False
 
 
+class ResumeUploadResult(BaseModel):
+    """What the profile's resume section showed before and after one upload."""
+
+    before_filename: str | None = None
+    before_updated: str | None = None
+    after_filename: str | None = None
+    after_updated: str | None = None
+    verified: bool = False  # the profile (after a reload) shows the uploaded file
+    note: str | None = None
+
+
 class JobListingSummary(BaseModel):
     """One row from a Naukri search-results page — inspection-only, not the full JobCreate shape."""
 

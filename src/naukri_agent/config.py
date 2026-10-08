@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     auto_apply_max_job_age_days: int = 7
     # While this file exists, auto-apply refuses to run. A manual kill switch.
     auto_apply_pause_file: Path = Path("./data/PAUSE_AUTO_APPLY")
+    # Daily resume rotation on the Naukri profile (`profile-refresh --execute`). OFF unless set.
+    profile_refresh_enabled: bool = False
+    profile_refresh_pause_file: Path = Path("./data/PAUSE_PROFILE_REFRESH")
 
     # --- Telegram: the human-in-the-loop channel for `telegram-apply` ---
     # Create a bot with @BotFather, put its token here (never in chat or code),

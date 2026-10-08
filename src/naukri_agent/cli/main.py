@@ -219,6 +219,28 @@ def inspect_naukri(query: str) -> None:
         sys.exit(1)
 
 
+@cli.command("profile-refresh")
+@click.option("--execute", is_flag=True, default=False,
+              help="Actually upload the next resume (needs PROFILE_REFRESH_ENABLED=true). Without it: dry run.")
+def profile_refresh(execute: bool) -> None:
+    """
+    Refresh the Naukri profile by uploading the next of your resumes in rotation (one per
+    day, registry order). Dry run by default: shows which resume is next, changes nothing.
+    """
+    settings = get_settings()
+    from naukri_agent.orchestration.profile_refresh import run_profile_refresh
+
+    notify = None
+    if execute and settings.telegram_bot_token and settings.telegram_chat_id:
+        from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
+
+        notify = build_telegram_interaction(settings).notify
+    result = _explain_busy_database(lambda: run_profile_refresh(settings, execute=execute, notify=notify))
+    click.echo(result.model_dump_json(indent=2))
+    if result.outcome in {"failed", "needs_human", "unconfirmed"}:
+        sys.exit(1)
+
+
 @cli.command("linkedin-inspect")
 @click.option("--query", default="data scientist", show_default=True, help="Job search keywords.")
 @click.option("--location", default="India", show_default=True, help="Job search location.")
@@ -287,7 +309,11 @@ def inspect_apply(job_url: str, reuse_session: bool) -> None:
     "--reuse-session", is_flag=True, default=False,
     help="Reuse the persistent browser profile instead of an isolated, disposable one.",
 )
-def inspect_profile_edit(reuse_session: bool) -> None:
+@click.option(
+    "--manual-open/--no-manual-open", default=True, show_default=True,
+    help="Pause so YOU open the edit panel (click the pencil next to Resume headline); it is then captured.",
+)
+def inspect_profile_edit(reuse_session: bool, manual_open: bool) -> None:
     """
     READ-ONLY inspection of Naukri's profile-EDIT page DOM (currently
     completely unknown to this codebase). No save/submit, no upload, no
@@ -301,7 +327,9 @@ def inspect_profile_edit(reuse_session: bool) -> None:
     settings = get_settings()
     from naukri_agent.browser.profile_inspection import run_profile_edit_inspection
 
-    report = run_profile_edit_inspection(settings, isolated_profile=not reuse_session)
+    report = run_profile_edit_inspection(
+        settings, isolated_profile=not reuse_session, capture_after_manual_open=manual_open
+    )
     click.echo(json.dumps(report, indent=2))
     if not report.get("completed"):
         sys.exit(1)

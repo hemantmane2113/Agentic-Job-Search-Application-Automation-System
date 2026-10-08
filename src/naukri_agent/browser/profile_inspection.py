@@ -38,6 +38,7 @@ from typing import Any, Callable
 from naukri_agent.browser import selectors
 from naukri_agent.browser.browser_manager import BrowserManager
 from naukri_agent.browser.exceptions import NaukriAutomationError, NaukriCaptchaError, NaukriMfaError
+from naukri_agent.browser.apply_inspection import MutatingRequestBlocker
 from naukri_agent.browser.inspection import _handle_login_challenge, _record_failure, _save_snapshot
 from naukri_agent.browser.models import ProfileEditControl, ProfileEditInspection
 from naukri_agent.browser.naukri_client import NaukriClient
@@ -135,6 +136,7 @@ def run_profile_edit_inspection(
     *,
     isolated_profile: bool = True,
     wait_for_manual_completion: Callable[[str], None] | None = None,
+    capture_after_manual_open: bool = False,
 ) -> dict:
     """
     Run the profile-edit inspection end to end. wait_for_manual_completion
@@ -178,15 +180,44 @@ def run_profile_edit_inspection(
             report["steps"].append({"step": "login", "status": login_result.status.value})
             _save_snapshot(browser.page, out_dir, "01_post_login")
 
+            blocker = None
+            if capture_after_manual_open and getattr(browser, "context", None) is not None:
+                # Default-deny for the rest of the session (login is done, so nothing legitimate is
+                # blocked): even if the person presses Save in the manual step, nothing is sent -
+                # and the blocked request's method + path tells us the save endpoint.
+                blocker = MutatingRequestBlocker()
+                blocker.install(browser.context)
+                blocker.arm()
+
             browser.page.goto(selectors.PROFILE_EDIT_URL)
             browser.page.wait_for_load_state("networkidle")
             inspection = _extract_profile_edit_ui(browser.page)
             report["steps"].append({"step": "profile_edit_ui", "result": inspection.model_dump()})
             _save_snapshot(browser.page, out_dir, "02_profile_edit")
 
+            if capture_after_manual_open:
+                # The edit panel only exists after a click, and this tool never clicks. So the
+                # person opens it (e.g. the pencil next to Resume headline), then we read it.
+                wait_for_manual_completion(
+                    "\n[ACTION REQUIRED] In the browser window, click the small pencil/edit icon next to\n"
+                    "'Resume headline' so its edit panel opens. Do NOT change any text. You may press\n"
+                    "Save once if you like - nothing will be sent, it is blocked and only logged.\n"
+                    "Then press Enter here: "
+                )
+                after = _extract_profile_edit_ui(browser.page)
+                report["steps"].append({"step": "profile_edit_ui_after_manual_open", "result": after.model_dump()})
+                _save_snapshot(browser.page, out_dir, "03_after_manual_open")
+                if blocker is not None:
+                    report["blocked_mutating_requests"] = {
+                        "count": len(blocker.blocked),
+                        "requests": [r.model_dump() for r in blocker.blocked],
+                    }
+
             report["completed"] = True
 
         except NaukriAutomationError as exc:
+            _record_failure(report, browser.page, out_dir, exc)
+        except EOFError as exc:  # no interactive terminal for the manual step
             _record_failure(report, browser.page, out_dir, exc)
         except PlaywrightError as exc:
             _record_failure(report, browser.page, out_dir, exc)

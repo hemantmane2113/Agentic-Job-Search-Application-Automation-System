@@ -22,6 +22,7 @@ from naukri_agent.browser.models import (
     JobListingSummary,
     LoginResult,
     ResumeState,
+    ResumeUploadResult,
 )
 from naukri_agent.config import Settings
 
@@ -49,6 +50,10 @@ class NaukriClient(JobBoardClient):
 
     def get_profile_resume(self) -> ResumeState:
         return _profile.get_profile_resume(self._page)
+
+    def upload_resume(self, path: Any) -> ResumeUploadResult:
+        """WRITE: replace the profile's resume with `path` (also refreshes 'last updated')."""
+        return _profile.upload_resume(self._page, path)
 
     def search_jobs(self, query: str, location: str = "") -> list[JobListingSummary]:
         return _jobs.search_jobs(self._page, query, location)
