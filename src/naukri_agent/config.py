@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     # After the daily run, tell the phone how many jobs are ready for `telegram-apply` (only when
     # Telegram is set up and there is at least one). Never applies anything by itself.
     telegram_ping_apply_ready: bool = True
+    # Morning watchdog (`naukri-agent watchdog`, run by a scheduled task at 10:30 and 15:00).
+    watchdog_daily_task_name: str = "Naukri Agent - Daily Jobs"
+    watchdog_run_start_by: str = "10:30"  # local time after which "the run has not started" counts as a problem
+    watchdog_digest_by: str = "15:00"  # local time after which "no finished digest yet" counts as a problem
+    watchdog_max_run_hours: float = 5.0  # a run still going after this long is reported as possibly stuck
+    watchdog_send_ok: bool = False  # also send a one-line "all good" once the digest is done
+    watchdog_state_file: Path = Path("./data/watchdog_state.json")  # what it already said today
     # Parsing a job description with the local LLM sometimes fails for a reason that a second
     # attempt fixes (a timeout, a malformed reply). Retry once, at most this many times per run
     # in total, so a bad day cannot add hours. An oversized description is never retried.

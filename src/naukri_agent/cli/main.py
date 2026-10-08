@@ -219,6 +219,22 @@ def inspect_naukri(query: str) -> None:
         sys.exit(1)
 
 
+@cli.command("watchdog")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what it would report; send and record nothing.")
+def watchdog(dry_run: bool) -> None:
+    """
+    Check that the morning chain happened (profile refresh, job-search run, digest) and tell the
+    phone on Telegram about any problem, once per problem per day. Silent when all is well.
+    """
+    settings = get_settings()
+    from naukri_agent.orchestration.watchdog import run_watchdog
+
+    result = run_watchdog(settings, dry_run=dry_run)
+    click.echo(result.model_dump_json(indent=2))
+    if result.problems:
+        sys.exit(1)
+
+
 @cli.command("profile-refresh")
 @click.option("--execute", is_flag=True, default=False,
               help="Actually upload the next resume (needs PROFILE_REFRESH_ENABLED=true). Without it: dry run.")
