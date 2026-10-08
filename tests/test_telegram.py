@@ -101,13 +101,45 @@ def test_discover_chat_id_finds_the_first_sender():
 
 
 def test_transport_errors_never_leak_the_bot_token(monkeypatch):
-    def boom(req, timeout=None):
+    def boom(req, timeout=None, context=None):
         raise urllib.error.URLError("https://api.telegram.org/botSECRETTOKEN123/getUpdates failed")
 
     monkeypatch.setattr(tg.urllib.request, "urlopen", boom)
     with pytest.raises(TelegramError) as exc:
         tg.http_transport("SECRETTOKEN123")("getUpdates", {}, 5)
     assert "SECRETTOKEN123" not in str(exc.value) and "URLError" in str(exc.value)
+
+
+def test_transport_keeps_certificate_checking_on_and_uses_a_full_ca_bundle(monkeypatch):
+    import io
+    import ssl
+
+    seen = {}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None, context=None):
+        seen["ctx"] = context
+        return _Resp(b'{"ok": true, "result": []}')
+
+    monkeypatch.setattr(tg.urllib.request, "urlopen", fake_urlopen)
+    assert tg.http_transport("T")("getMe", {}, 5) == {"ok": True, "result": []}
+    assert seen["ctx"].verify_mode == ssl.CERT_REQUIRED and seen["ctx"].check_hostname is True
+
+
+def test_a_rejected_token_and_a_network_problem_are_told_apart(monkeypatch):
+    def http_401(req, timeout=None, context=None):
+        raise urllib.error.HTTPError("https://x/botSECRET/getMe", 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(tg.urllib.request, "urlopen", http_401)
+    with pytest.raises(TelegramError) as exc:
+        tg.http_transport("SECRET")("getMe", {}, 5)
+    assert "HTTP 401" in str(exc.value) and "SECRET" not in str(exc.value)
 
 
 # --- the interaction wording ---------------------------------------------------------------

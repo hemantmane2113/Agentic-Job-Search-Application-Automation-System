@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -37,7 +38,23 @@ class TelegramError(Exception):
     """A Telegram call failed. The message holds only the error TYPE, never the URL or token."""
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Verifying context backed by certifi's CA bundle. Python on Windows only trusts
+    the roots Windows happens to have installed, and a PC that has never needed
+    GoDaddy's root (Telegram's CA) fails with "self-signed certificate in
+    certificate chain" even though nothing is wrong. Certificate checking stays ON;
+    only the list of trusted roots is the standard, complete one."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 - fall back to the system store
+        return ssl.create_default_context()
+
+
 def http_transport(token: str) -> Transport:
+    ctx = _ssl_context()
+
     def call(method: str, params: dict, timeout: float) -> dict:
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/{method}",
@@ -46,8 +63,13 @@ def http_transport(token: str) -> Transport:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:  # 401/404 here means the token was rejected
+            raise TelegramError(f"{method} failed: HTTP {exc.code}") from None
+        except urllib.error.URLError as exc:
+            # the reason's TYPE (e.g. SSLCertVerificationError, gaierror) is safe; its text could echo the URL
+            raise TelegramError(f"{method} failed: URLError/{type(exc.reason).__name__}") from None
         except Exception as exc:  # noqa: BLE001 - the URL (and token) must never leak via str(exc)
             raise TelegramError(f"{method} failed: {type(exc).__name__}") from None
 

@@ -371,7 +371,10 @@ def telegram_setup(wait: int) -> None:
     try:
         chat_id = TelegramChannel(settings.telegram_bot_token, "0").discover_chat_id(wait)
     except TelegramError as exc:
-        raise click.ClickException(f"Telegram rejected the request ({exc}). Check TELEGRAM_BOT_TOKEN.")
+        raise click.ClickException(
+            f"Could not talk to Telegram ({exc}). HTTP 401/404 means the token is wrong - check "
+            "TELEGRAM_BOT_TOKEN; URLError means a network or certificate problem on this PC."
+        )
     if chat_id is None:
         raise click.ClickException("No message reached the bot in time. Send it a message and run this again.")
     click.echo(f"Found your chat id. Add this line to .env:\n\nTELEGRAM_CHAT_ID={chat_id}")
