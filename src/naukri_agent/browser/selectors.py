@@ -122,6 +122,13 @@ JOB_CARD_POSTED = "span.job-post-day, span[class*='job-post-day']"
 # that safely, without ever clicking it from automation.
 APPLY_BUTTON = "#apply-button, button[class*='apply']"  # UNVERIFIED (presence seen; click behaviour unknown)
 
+# VERIFIED 2026-10-07 (read-only page scan of real job listings: present
+# and visible on company-site-only listings, absent on listings that have
+# a native Naukri Apply button; text "Apply on company site"). A
+# company-site listing sends the applicant to the employer's own website
+# -- there is no Naukri application for `apply` to automate.
+COMPANY_SITE_APPLY_BUTTON = "#company-site-button"
+
 # UNVERIFIED. The pre-click capture proved these controls do NOT exist
 # before Apply is clicked (empty `<div id="chatbot-container"></div>` is
 # the only apply-related mount point). Kept for Stage 1's read-only

@@ -14,6 +14,7 @@ import re as _re
 from typing import Any
 
 from naukri_agent.browser import selectors
+from naukri_agent.browser.apply_type import detect_apply_type
 from naukri_agent.browser.models import (
     ApplicationWorkflowInspection,
     JobDetail,
@@ -104,6 +105,7 @@ def fetch_job_detail(page: Any, url: str) -> JobDetail:
         posted_date_text=posted or None,
         ld_json_skills=ld_json_skills,
         key_skills_dom=key_skills_dom,
+        apply_type=detect_apply_type(page),
     )
 
 

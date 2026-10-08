@@ -87,6 +87,9 @@ class JobDetail(BaseModel):
     # convention as every field above.
     ld_json_skills: list[str] | None = None
     key_skills_dom: list[KeySkillChip] | None = None
+    # "native" | "company_site" | "none" -- how this listing can be applied to,
+    # read from the page already loaded for the JD (no extra navigation).
+    apply_type: str | None = None
 
 
 class ApplicationWorkflowInspection(BaseModel):

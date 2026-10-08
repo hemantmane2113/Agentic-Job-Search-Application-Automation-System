@@ -62,6 +62,8 @@ class Recommendation(BaseModel):
     freshness_label: str = "Newly discovered"
 
     naukri_url: str  # ALWAYS from Job.url
+    # "native" | "company_site" | "none" | None (not yet checked) -- from Job.apply_type
+    apply_type: str | None = None
 
 
 class RecommendationDigest(BaseModel):

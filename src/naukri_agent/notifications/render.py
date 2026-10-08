@@ -31,6 +31,16 @@ def _experience(rec: Recommendation) -> str:
     return "Not stated"
 
 
+def _apply_line(rec: Recommendation) -> str | None:
+    """How to apply, from the page's own apply button. Nothing is shown when
+    it was never checked or the page had no apply control."""
+    if rec.apply_type == "company_site":
+        return "   How to apply: ON THE COMPANY'S WEBSITE - apply manually (use the link below, then run mark-applied)"
+    if rec.apply_type == "native":
+        return "   How to apply: Naukri Apply button"
+    return None
+
+
 def _block(rec: Recommendation) -> str:
     lines = [
         f"{rec.rank}. {rec.job_title} — {rec.company}",
@@ -51,6 +61,9 @@ def _block(rec: Recommendation) -> str:
         lines += [f"     - {g}" for g in rec.gaps]
     if rec.explanation:
         lines.append(f"   Note ({rec.explanation_source}): {rec.explanation}")
+    apply_line = _apply_line(rec)
+    if apply_line:
+        lines.append(apply_line)
     lines.append(f"   Naukri: {rec.naukri_url}")
     return "\n".join(lines)
 

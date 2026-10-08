@@ -96,6 +96,22 @@ class NaukriClient(JobBoardClient):
             self._apply_session = ApplyWorkflowSession(self._page)
         return self._apply_session
 
+    def open_job_page(self, url: str) -> None:
+        # Plain GET navigation, so it is safe before the apply session's
+        # network guard is armed. Without this step click_apply() runs
+        # against whatever page login() left behind (the Naukri homepage),
+        # which has no Apply button.
+        self._page.goto(url)
+        try:
+            self._page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:  # noqa: BLE001 - a slow settle must not abort; click_apply() has its own timeout
+            pass
+
+    def detect_apply_type(self) -> str:
+        from naukri_agent.browser.apply_workflow import detect_apply_type
+
+        return detect_apply_type(self._page)
+
     def click_apply(self) -> None:
         self._get_apply_session().click_apply()
 

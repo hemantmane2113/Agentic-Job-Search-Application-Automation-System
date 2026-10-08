@@ -107,6 +107,20 @@ class ApplyRunResult(BaseModel):
     aborted_reason: str | None = None
 
 
+_NO_NATIVE_APPLY_REASONS = {
+    "company_site": (
+        "This listing only offers 'Apply on company site', which sends you to the "
+        "employer's own website, so there is no Naukri application to automate. "
+        "Nothing was clicked. Apply there yourself, then record it with "
+        "`naukri-agent mark-applied`."
+    ),
+    "none": (
+        "No Naukri Apply button was found on the job page (it may be expired, already "
+        "applied, removed, or Naukri's layout changed). Nothing was clicked."
+    ),
+}
+
+
 def _build_summary(
     title: str,
     company: str,
@@ -173,7 +187,7 @@ def run_apply_workflow(
                 job_id=-1, title="", company="", attempt_id=attempt_id,
                 aborted_reason=f"No job matched {job_ident!r} (by id / external id / URL).",
             )
-        job_id, job_title, company = job.id, job.title, job.company
+        job_id, job_title, company, job_url = job.id, job.title, job.company, job.url
         selection = latest_resume_selection(session, job_id)
         resume_id = selection.resume_id if selection else None
         resume_file = selection.file_path if selection else None
@@ -199,6 +213,16 @@ def run_apply_workflow(
     with BrowserManager(settings, profile_dir_override=profile_dir) as browser:
         client = NaukriClient(browser.page, settings)
         client.login()
+        client.open_job_page(job_url)
+
+        apply_type = client.detect_apply_type()
+        if apply_type != "native":
+            return ApplyRunResult(
+                job_id=job_id, title=job_title, company=company, resume_id=resume_id,
+                resume_file=resume_file, attempt_id=attempt_id,
+                aborted_reason=_NO_NATIVE_APPLY_REASONS.get(apply_type, _NO_NATIVE_APPLY_REASONS["none"]),
+            )
+
         client.click_apply()
         questions = client.list_questions()
 

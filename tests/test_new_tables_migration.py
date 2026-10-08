@@ -133,3 +133,47 @@ def test_init_db_is_idempotent_on_a_fully_migrated_db(tmp_path):
     factory2 = init_db(settings)
     with session_scope(factory2) as s:
         assert s.query(ApplicationHistory).count() == 1
+
+
+def test_init_db_adds_nullable_columns_that_a_later_release_put_on_an_existing_table(tmp_path):
+    """create_all() never adds columns to an existing table, so a DB from
+    before job_extractions gained contact_email/email_application_signal/
+    source_content_fingerprint failed every JobExtraction query with 'no
+    such column' (found just before a scheduled run). init_db() now adds
+    missing NULLABLE columns itself, keeps existing rows, and is idempotent."""
+    import sqlite3
+
+    from naukri_agent.database.models import JobExtraction
+
+    db_file = tmp_path / "old.db"
+    settings = Settings(_env_file=None, database_url=f"sqlite:///{db_file}")
+    factory = init_db(settings)
+
+    with session_scope(factory) as s:
+        job, _ = upsert_job(s, JobCreate(
+            title="t", company="c", location="l", description="d",
+            url="https://www.naukri.com/job-listings-x-1",
+        ))
+        s.add(JobExtraction(job_id=job.id, extraction_version=1, is_current=True))
+
+    new_cols = ["contact_email", "email_application_signal", "source_content_fingerprint"]
+    raw = sqlite3.connect(db_file)
+    for col in new_cols:
+        raw.execute(f"ALTER TABLE job_extractions DROP COLUMN {col}")
+    raw.commit()
+    raw.close()
+
+    cols_before = {c["name"] for c in inspect(create_engine(settings.database_url)).get_columns("job_extractions")}
+    assert not set(new_cols) & cols_before
+
+    factory = init_db(settings)  # the migration under test
+
+    cols_after = {c["name"] for c in inspect(create_engine(settings.database_url)).get_columns("job_extractions")}
+    assert set(new_cols) <= cols_after
+    with session_scope(factory) as s:
+        rows = s.query(JobExtraction).all()  # would raise OperationalError before the fix
+        assert len(rows) == 1 and rows[0].source_content_fingerprint is None
+
+    from naukri_agent.database.base import _add_missing_nullable_columns
+
+    assert _add_missing_nullable_columns(create_engine(settings.database_url)) == []  # idempotent

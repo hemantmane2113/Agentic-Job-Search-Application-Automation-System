@@ -38,6 +38,12 @@ from naukri_agent.browser.apply_inspection import (
     MutatingRequestBlocker,
     extract_application_ui,  # noqa: F401 - re-exported for callers that want a UI read alongside the question list
 )
+from naukri_agent.browser.apply_type import (  # noqa: F401 - detect_apply_type re-exported for callers/tests
+    APPLY_TYPE_COMPANY_SITE,
+    APPLY_TYPE_NATIVE,
+    APPLY_TYPE_NONE,
+    detect_apply_type,
+)
 from naukri_agent.browser.models import ApplyQuestionPrompt, ApplySubmissionResult
 
 logger = logging.getLogger(__name__)

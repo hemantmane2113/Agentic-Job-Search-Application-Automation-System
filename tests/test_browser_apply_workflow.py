@@ -122,3 +122,53 @@ def test_parse_questionnaire_returns_empty_and_notes_on_unknown_shape():
     prompts, notes = _parse_questionnaire({"statusCode": 0, "flowType": "default"})
     assert prompts == []
     assert notes and "could not locate" in notes[0]
+
+
+# --- detect_apply_type: read-only classification of a loaded job page ---
+
+
+class _Handle:
+    def __init__(self, visible):
+        self._visible = visible
+
+    def is_visible(self):
+        return self._visible
+
+
+class _DetectPage:
+    """Only the two calls detect_apply_type is allowed to make."""
+
+    def __init__(self, matches):
+        self._matches = matches  # selector -> list[_Handle]
+
+    def query_selector_all(self, selector):
+        return self._matches.get(selector, [])
+
+
+def test_detect_apply_type_native_company_site_and_none():
+    from naukri_agent.browser import selectors
+    from naukri_agent.browser.apply_workflow import detect_apply_type
+
+    native = _DetectPage({selectors.APPLY_BUTTON: [_Handle(True), _Handle(False)]})
+    company = _DetectPage({selectors.COMPANY_SITE_APPLY_BUTTON: [_Handle(True), _Handle(False)]})
+    hidden_only = _DetectPage({selectors.APPLY_BUTTON: [_Handle(False)]})
+    both = _DetectPage({
+        selectors.APPLY_BUTTON: [_Handle(True)],
+        selectors.COMPANY_SITE_APPLY_BUTTON: [_Handle(True)],
+    })
+
+    assert detect_apply_type(native) == "native"
+    assert detect_apply_type(company) == "company_site"
+    assert detect_apply_type(hidden_only) == "none"
+    assert detect_apply_type(_DetectPage({})) == "none"
+    assert detect_apply_type(both) == "native"
+
+
+def test_detect_apply_type_treats_a_page_that_raises_as_none():
+    from naukri_agent.browser.apply_workflow import detect_apply_type
+
+    class _Broken:
+        def query_selector_all(self, selector):
+            raise RuntimeError("page closed")
+
+    assert detect_apply_type(_Broken()) == "none"

@@ -35,7 +35,8 @@ class FakeApplyClient:
     """Stands in for NaukriClient's apply-write surface only — the real
     DOM mechanics are already covered by test_browser_apply_workflow.py."""
 
-    def __init__(self, page, settings, *, questions, submit_result):
+    def __init__(self, page, settings, *, questions, submit_result, apply_type="native"):
+        self.apply_type = apply_type
         self.questions = list(questions)
         self.submit_result = submit_result
         self.skipped: list[str] = []
@@ -43,13 +44,25 @@ class FakeApplyClient:
         self.apply_clicked = False
         self.logged_in = False
         self.submitted_called = False
+        self.calls: list[str] = []
+        self.opened_url: str | None = None
 
     def login(self):
         self.logged_in = True
+        self.calls.append("login")
         return None
+
+    def open_job_page(self, url):
+        self.opened_url = url
+        self.calls.append("open_job_page")
+
+    def detect_apply_type(self):
+        self.calls.append("detect_apply_type")
+        return self.apply_type
 
     def click_apply(self):
         self.apply_clicked = True
+        self.calls.append("click_apply")
 
     def list_questions(self):
         return self.questions
@@ -146,6 +159,64 @@ def _make_job(settings, slug, ext):
         job = add_job(s, slug=slug, ext=ext)
         job_id = job.id
     return factory, job_id
+
+
+def test_job_page_is_opened_after_login_and_before_clicking_apply(tmp_path, monkeypatch):
+    """Regression for the first live run: login() leaves the browser on the
+    Naukri homepage, so click_apply() timed out because nothing navigated to
+    the job's own page first."""
+    from naukri_agent.database.models import Job
+
+    fake_client = FakeApplyClient(
+        None, None, questions=[], submit_result=ApplySubmissionResult(submitted=True),
+    )
+    settings = _patch_common(monkeypatch, tmp_path, fake_client=fake_client)
+    factory, job_id = _make_job(settings, "nav", "040926000250")
+
+    run_apply_workflow(settings, str(job_id), interaction=FakeInteraction())
+
+    with session_scope(factory) as s:
+        expected_url = s.get(Job, job_id).url
+    assert fake_client.opened_url == expected_url
+    assert fake_client.calls[:4] == ["login", "open_job_page", "detect_apply_type", "click_apply"]
+
+
+def test_company_site_listing_aborts_cleanly_without_clicking_anything(tmp_path, monkeypatch):
+    from naukri_agent.database.models import ApplicationHistory, ApplicationQuestion
+
+    fake_client = FakeApplyClient(
+        None, None, questions=[], submit_result=ApplySubmissionResult(submitted=True),
+        apply_type="company_site",
+    )
+    settings = _patch_common(monkeypatch, tmp_path, fake_client=fake_client)
+    factory, job_id = _make_job(settings, "cs", "040926000260")
+
+    result = run_apply_workflow(settings, str(job_id), interaction=FakeInteraction())
+
+    assert result.submitted is False
+    assert "company site" in result.aborted_reason.lower()
+    assert "mark-applied" in result.aborted_reason
+    assert fake_client.apply_clicked is False
+    assert fake_client.answered == [] and fake_client.skipped == []
+    assert fake_client.submitted_called is False
+    with session_scope(factory) as s:
+        assert s.query(ApplicationHistory).count() == 0
+        assert s.query(ApplicationQuestion).count() == 0
+
+
+def test_page_with_no_apply_button_aborts_cleanly_without_clicking_anything(tmp_path, monkeypatch):
+    fake_client = FakeApplyClient(
+        None, None, questions=[], submit_result=ApplySubmissionResult(submitted=True),
+        apply_type="none",
+    )
+    settings = _patch_common(monkeypatch, tmp_path, fake_client=fake_client)
+    _factory, job_id = _make_job(settings, "nb", "040926000261")
+
+    result = run_apply_workflow(settings, str(job_id), interaction=FakeInteraction())
+
+    assert result.submitted is False
+    assert "No Naukri Apply button" in result.aborted_reason
+    assert fake_client.apply_clicked is False
 
 
 def test_skippable_question_is_skipped_not_drafted(tmp_path, monkeypatch):

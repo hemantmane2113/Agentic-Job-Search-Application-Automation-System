@@ -286,3 +286,59 @@ def test_excel_regeneration_does_not_preserve_hand_edits(tmp_path):
 
     wb2 = load_workbook(path)
     assert wb2["Jobs"].cell(row=2, column=20).value != "HAND EDITED NOTE"
+
+
+# --- how-to-apply label (native Naukri button vs company website) -----------
+
+
+def test_digest_labels_company_site_jobs_for_manual_apply_and_native_ones(tmp_path):
+    cfg = settings(tmp_path)
+    with session_scope(in_memory_factory()) as s:
+        cand = make_candidate(s)
+        run = make_run(s)
+        native = add_job(s, slug="nat", ext="040926000101", title="Native Role", company="A")
+        external = add_job(s, slug="ext", ext="040926000102", title="Company Site Role", company="B")
+        unknown = add_job(s, slug="unk", ext="040926000103", title="Unchecked Role", company="C")
+        native.apply_type = "native"
+        external.apply_type = "company_site"
+        for j, sc in ((native, 90.0), (external, 85.0), (unknown, 80.0)):
+            score(s, cand.id, j.id, overall=sc)
+        d = build_digest(
+            s, candidate_id=cand.id, candidate_email=cand.email,
+            scored_job_ids=[native.id, external.id, unknown.id], settings=cfg, run_id=run.id,
+            now=datetime.datetime(2026, 9, 9, tzinfo=UTC),
+        )
+        body = render_digest(d, cfg).text_body
+
+    by_title = {r.job_title: r for r in d.recommendations}
+    assert by_title["Native Role"].apply_type == "native"
+    assert by_title["Company Site Role"].apply_type == "company_site"
+    assert by_title["Unchecked Role"].apply_type is None
+
+    assert body.count("How to apply: ON THE COMPANY'S WEBSITE") == 1
+    assert body.count("How to apply: Naukri Apply button") == 1
+    blocks = body.split("\n\n")
+    unchecked = next(b for b in blocks if "Unchecked Role" in b)
+    assert "How to apply" not in unchecked  # never-checked jobs get no label rather than a guess
+
+
+def test_upsert_job_stores_apply_type_and_a_missing_reading_never_erases_it():
+    from naukri_agent.database.repositories import upsert_job
+    from naukri_agent.jobs.models import JobCreate
+
+    def spec(apply_type):
+        return JobCreate(
+            title="t", company="c", location="l", description="d",
+            url="https://www.naukri.com/job-listings-apply-type-040926000200",
+            apply_type=apply_type,
+        )
+
+    with session_scope(in_memory_factory()) as s:
+        job, created = upsert_job(s, spec("company_site"))
+        assert created and job.apply_type == "company_site"
+
+        job, created = upsert_job(s, spec(None))  # page not read this time
+        assert not created and job.apply_type == "company_site"
+
+        job, _ = upsert_job(s, spec("native"))  # listing changed
+        assert job.apply_type == "native"

@@ -133,6 +133,9 @@ class Job(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     posted_date_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
     source: Mapped[str] = mapped_column(String(50), default="naukri")
+    # How the listing can be applied to, as last seen on its page: "native"
+    # (Naukri Apply button), "company_site", "none", or NULL (never checked).
+    apply_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Sighting bookkeeping
     discovered_at: Mapped[datetime.datetime] = mapped_column(

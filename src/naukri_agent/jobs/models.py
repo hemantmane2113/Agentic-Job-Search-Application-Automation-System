@@ -67,6 +67,7 @@ class JobCreate(BaseModel):
     url: str
     posted_date_text: str | None = None
     source: str = "naukri"
+    apply_type: str | None = None  # "native" | "company_site" | "none"
 
 
 class JobExtractionCreate(BaseModel):

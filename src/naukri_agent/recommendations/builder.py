@@ -343,6 +343,7 @@ def build_digest(
             freshness=freshness,
             freshness_label=freshness_label,
             naukri_url=job.url,  # ALWAYS from the DB
+            apply_type=getattr(job, "apply_type", None),
         )
         recs.append(rec)
         row = latest_job_match(session, candidate_id, canon_id)
