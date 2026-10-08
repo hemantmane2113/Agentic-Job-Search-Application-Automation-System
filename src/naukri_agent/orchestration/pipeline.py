@@ -87,6 +87,25 @@ def _parse_with_retry(provider, job, budget: list[int]):
     return JobParser(provider).parse(job), True
 
 
+def _telegram_slots(session, candidate_id, settings, now) -> int:
+    """
+    How many Naukri-Apply applications today's budget reserves: the ones actually ready for telegram-apply, up to
+    what is still allowed in the rolling 24 hours. The rest of daily_job_total goes to the 'apply yourself' list,
+    so on a day with few Naukri-Apply jobs that list grows (never past daily_recommendation_limit).
+    """
+    try:
+        from naukri_agent.database.repositories import auto_apply_count_since
+        from naukri_agent.recommendations.apply_ready import select_candidates
+
+        session.flush()
+        ready = len(select_candidates(session, candidate_id, settings, now))
+        remaining = max(0, settings.auto_apply_daily_cap - auto_apply_count_since(session, now - datetime.timedelta(hours=24)))
+        return min(ready, remaining)
+    except Exception as exc:  # noqa: BLE001 - if unsure, reserve the full Telegram share rather than overfill the list
+        logger.warning("could not work out today's Telegram slots: %s", type(exc).__name__)
+        return settings.auto_apply_daily_cap
+
+
 def _refresh_note(result) -> str | None:
     """One line for the email, or None when there is nothing worth saying."""
     outcome, rid = result.outcome, result.resume_id
@@ -333,7 +352,7 @@ def run_daily_recommendations(
                         add_run_event(session, daily_run_id=run_id, seq=seq, stage="parse",
                                       status=RunEventStatus.FAILED, job_id=job.id,
                                       detail={"error": (pr.error or "unknown")[:120], **norm_detail})
-            result = score_job(job, extraction_row, profile, resume, settings)
+            result = score_job(job, extraction_row, profile, resume, settings, now=now)
             upsert_job_match(
                 session, candidate.id, job.id, result,
                 job_extraction_id=extraction_row.id if extraction_row else None,
@@ -354,6 +373,8 @@ def run_daily_recommendations(
 
         # --- digest (application-aware, capped) ---
         session.flush()
+        telegram_slots = _telegram_slots(session, candidate.id, settings, now)
+        part1_limit = min(settings.daily_recommendation_limit, max(0, settings.daily_job_total - telegram_slots))
         digest = build_digest(
             session,
             candidate_id=candidate.id,
@@ -365,7 +386,11 @@ def run_daily_recommendations(
             explain_provider=(explain_provider if settings.explanation_use_llm else None),
             parse_failed_job_ids=parse_failed_ids,
             manual_apply_only=True,  # Part 1 = company-website jobs; Naukri-Apply jobs go via telegram-apply
+            limit=part1_limit,
         )
+        digest.telegram_slots = telegram_slots
+        digest.part1_limit = part1_limit
+        digest.daily_total = settings.daily_job_total
         digest.applied_via_agent = applied_via_agent_since(  # Part 2 = what the app applied to since the last digest
             session, previous_digest_time(session, run_id, now)
         )
@@ -465,11 +490,14 @@ def run_daily_recommendations(
 _PING_LIST_MAX = 5
 
 
+from naukri_agent.recommendations.employment import describe as describe_employment  # noqa: E402
+
+
 def _apply_ready_text(jobs: list[dict], remaining: int, cap: int) -> str:
     lines = [f"Naukri: {len(jobs)} job(s) ready to apply via Telegram (ACCEPT, Naukri Apply button).", ""]
     for i, j in enumerate(jobs[:_PING_LIST_MAX], 1):
         resume = j.get("resume_id") or "no role match"
-        lines.append(f"{i}. {j['title']} - {j['company']}  (score {j['score']:.0f}, resume {resume})")
+        lines.append(f"{i}. {j['title']} - {j['company']}  (score {j['score']:.0f}, resume {resume}, {describe_employment(j.get('employment_type_text'))})")
     if len(jobs) > _PING_LIST_MAX:
         lines.append(f"... and {len(jobs) - _PING_LIST_MAX} more")
     lines.append("")

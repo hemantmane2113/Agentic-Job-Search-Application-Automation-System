@@ -62,6 +62,10 @@ class NaukriClient(JobBoardClient):
     def search_jobs(self, query: str, location: str = "") -> list[JobListingSummary]:
         return _jobs.search_jobs(self._page, query, location)
 
+    def read_employment_type(self) -> str | None:
+        """Read-only: Naukri's own Employment Type line on the job page that is open right now."""
+        return _jobs.read_employment_type(self._page)
+
     def read_company_page(self, job_url: str) -> dict:
         """Read-only: the Naukri company page for a job (rating, reviews, locations, description)."""
         return _jobs.read_company_page(self._page, job_url)

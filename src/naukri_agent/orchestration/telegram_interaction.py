@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from naukri_agent.config import Settings
+from naukri_agent.recommendations.employment import describe as describe_employment
 from naukri_agent.notifications.telegram import TelegramChannel, TelegramError
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ def format_job_card(job: dict) -> str:
         f"Match score: {job['score']:.1f}",
         exp_line,
         "Resume: " + (job["resume_id"] if job.get("resume_id") else "none matched - the one already on your profile"),
+        "Job type: " + describe_employment(job.get("employment_type_text")),
         "",
     ]
     skill_lines = [

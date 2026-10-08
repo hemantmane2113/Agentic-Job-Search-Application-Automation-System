@@ -1,3 +1,5 @@
+import datetime
+
 import pytest
 
 from naukri_agent.candidate.models import CandidateProfile
@@ -21,6 +23,9 @@ def _job(**overrides) -> Job:
         location="Pune",
         description="d",
         content_fingerprint="fp",
+        # posted today, so the recency category earns its full marks and these tests keep isolating what they were
+        # written to isolate (recency has its own tests in test_recency.py)
+        posted_date_text=datetime.datetime.now(datetime.UTC).date().isoformat(),
     )
     defaults.update(overrides)
     return Job(**defaults)
@@ -106,7 +111,7 @@ def test_overall_score_is_weighted_sum_normalized_to_100():
     assert result.overall_score == expected
 
 
-def test_all_six_categories_present_in_result():
+def test_all_seven_categories_present_in_result():
     settings = _settings()
     result = score_job(_job(), _strong_extraction(), _strong_profile(), _resume(), settings)
     assert set(result.category_scores.keys()) == {
@@ -116,6 +121,7 @@ def test_all_six_categories_present_in_result():
         "salary",
         "location",
         "education",
+        "recency",
     }
 
 

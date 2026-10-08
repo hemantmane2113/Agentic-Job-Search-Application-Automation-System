@@ -170,7 +170,7 @@ def test_email_has_both_parts_with_counts_and_subject(tmp_path):
     assert "Q: Available for walk-in?" in body and "A: Yes" in body
     assert "08 Oct 2026, 01:30 PM" in body
     # the native job that is still waiting is only counted, never linked, in Part 1
-    assert "1 more matching job with a Naukri Apply button is waiting" in body
+    assert "1 more matching job with a Naukri Apply button is ready for Telegram" in body
 
 
 def test_empty_parts_say_so(tmp_path):
@@ -180,7 +180,7 @@ def test_empty_parts_say_so(tmp_path):
     assert "Nothing was applied via Telegram since the last digest." in body
     assert "0 to apply yourself, 0 applied for you" in msg.subject
     # the one native job is unapplied, so it is only counted in the footer
-    assert "1 more matching job with a Naukri Apply button is waiting" in body
+    assert "1 more matching job with a Naukri Apply button is ready for Telegram" in body
 
 
 def test_two_part_email_contains_no_secrets(tmp_path):

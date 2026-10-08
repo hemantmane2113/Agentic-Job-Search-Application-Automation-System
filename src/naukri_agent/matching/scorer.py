@@ -14,6 +14,8 @@ calls. An LLM may have produced the JobExtraction this function reads
 
 from __future__ import annotations
 
+import datetime
+
 from naukri_agent.candidate.models import CandidateProfile
 from naukri_agent.config import Settings
 from naukri_agent.database.models import Job, JobExtraction
@@ -30,6 +32,7 @@ from naukri_agent.matching.experience_matcher import (
 from naukri_agent.matching.education_matcher import score_education
 from naukri_agent.matching.location_matcher import score_location
 from naukri_agent.matching.models import CategoryScore, MatchDecision, MatchResult
+from naukri_agent.matching.recency_matcher import score_recency
 from naukri_agent.matching.role_matcher import score_role
 from naukri_agent.matching.salary_matcher import score_salary
 from naukri_agent.matching.skill_matcher import (
@@ -47,6 +50,7 @@ def score_job(
     profile: CandidateProfile,
     resume: MasterResume,
     settings: Settings,
+    now: datetime.datetime | None = None,
 ) -> MatchResult:
     """
     Score one job against one candidate. extraction may be None (a
@@ -64,6 +68,7 @@ def score_job(
         "salary": score_salary(extraction, profile, settings),
         "location": score_location(job, profile, settings),
         "education": score_education(extraction, resume, settings),
+        "recency": score_recency(job, settings, now),
     }
 
     # Deterministic, conflict-aware minimum-experience decision (Part A,

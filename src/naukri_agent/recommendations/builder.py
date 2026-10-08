@@ -49,6 +49,7 @@ from naukri_agent.llm.base import LLMProvider
 from naukri_agent.matching.models import CategoryScore, MatchResult
 from naukri_agent.orchestration.discovery import _parse_card_age_days
 from naukri_agent.recommendations.explain import explain_match
+from naukri_agent.recommendations.employment import is_excluded
 from naukri_agent.recommendations.models import (
     FreshnessLabel,
     Recommendation,
@@ -98,7 +99,7 @@ def _current_extraction(session: Session, job_id: int) -> JobExtraction | None:
 def _min_score(settings: Settings) -> float:
     if settings.recommendation_min_score is not None:
         return float(settings.recommendation_min_score)
-    return float(settings.threshold_review)
+    return float(settings.threshold_accept)
 
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?")
@@ -216,8 +217,10 @@ def build_digest(
     explain_provider: LLMProvider | None = None,
     parse_failed_job_ids: set[int] | None = None,
     manual_apply_only: bool = False,
+    limit: int | None = None,
 ) -> RecommendationDigest:
     now = now or datetime.datetime.now(datetime.UTC)
+    list_cap = settings.daily_recommendation_limit if limit is None else max(0, limit)
     min_score = _min_score(settings)
     allowed_decisions = {d.upper() for d in settings.recommendation_decisions}
     exclude_statuses = {s.upper() for s in settings.recommendation_exclude_if_status}
@@ -254,6 +257,7 @@ def build_digest(
 
     eligible: list[tuple[int, Job, MatchResult]] = []
     native_waiting = 0
+    type_excluded = 0
     for canon_id, job, mr in candidates:
         # LLM parse failed for this job this run -> raw-listing score only;
         # never recommendation-eligible (the JobMatch row still stands for
@@ -280,6 +284,11 @@ def build_digest(
                 ).total_seconds() / 86400.0
                 if elapsed < cooldown_days:
                     continue
+        # Only full-time, permanent jobs (Naukri's own Employment Type). Counted only if it would
+        # otherwise have been recommended; an unknown type is kept and marked on the job.
+        if is_excluded(job.employment_type_text, settings.employment_filter_enabled, title=job.title):
+            type_excluded += 1
+            continue
         # D. two-part email: a job with a Naukri Apply button belongs to telegram-apply, not to the
         #    "apply yourself" list. Counted (only AFTER passing every gate above) so the email can
         #    say how many are waiting. The cap below then applies to what is left, so natives
@@ -300,11 +309,14 @@ def build_digest(
         _canon, job, mr = t
         age, recency = _posted_age_and_recency(job.posted_date_text, now)
         first_seen_ts = job.first_seen_at.timestamp() if job.first_seen_at else 0.0
-        return (_freshness_bucket(age), -mr.overall_score, -recency, -first_seen_ts)
+        if settings.recommendation_rank_freshness_first:
+            return (_freshness_bucket(age), -mr.overall_score, -recency, -first_seen_ts)
+        # highest score first; freshness only breaks ties
+        return (-mr.overall_score, _freshness_bucket(age), -recency, -first_seen_ts)
 
     eligible.sort(key=_rank_key)
     eligible_count = len(eligible)
-    kept = eligible[: settings.daily_recommendation_limit]
+    kept = eligible[:list_cap]
 
     recs: list[Recommendation] = []
     for rank, (canon_id, job, mr) in enumerate(kept, start=1):
@@ -353,6 +365,7 @@ def build_digest(
             freshness_label=freshness_label,
             naukri_url=job.url,  # ALWAYS from the DB
             apply_type=getattr(job, "apply_type", None),
+            employment_type_text=getattr(job, "employment_type_text", None),
         )
         recs.append(rec)
         row = latest_job_match(session, candidate_id, canon_id)
@@ -375,14 +388,16 @@ def build_digest(
         run_date=now.date(),
         generated_at=now,
         candidate_email=candidate_email,
-        limit=settings.daily_recommendation_limit,
+        limit=list_cap,
         eligible_count=eligible_count,
         count=len(recs),
-        truncated=eligible_count > settings.daily_recommendation_limit,
+        truncated=eligible_count > list_cap,
         recommendations=recs,
         run_id=run_id,
         two_part=manual_apply_only,
         native_waiting=native_waiting,
+        type_excluded=type_excluded,
+        min_score=min_score,
     )
 
 

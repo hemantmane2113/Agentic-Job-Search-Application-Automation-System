@@ -239,23 +239,37 @@ def watchdog(dry_run: bool) -> None:
 @click.option("--max-jobs", type=click.IntRange(min=1), default=None, help="Research at most this many jobs (default: RESEARCH_MAX_JOBS).")
 @click.option("--job-id", type=int, default=None, help="Research this one job, even if it was done recently.")
 @click.option("--dry-run", is_flag=True, default=False, help="Print the reports; save nothing and send nothing.")
-def research_jobs(max_jobs: int | None, job_id: int | None, dry_run: bool) -> None:
+@click.option("--wait-for-digest", is_flag=True, default=False,
+              help="First wait until today's daily run has finished (so this can be scheduled at 10:05).")
+@click.option("--telegram/--no-telegram", default=False, help="Also send each report to Telegram (default: email only).")
+def research_jobs(max_jobs: int | None, job_id: int | None, dry_run: bool, wait_for_digest: bool, telegram: bool) -> None:
     """
-    Run the company-site job researcher (an AI agent with read-only tools) over the jobs the latest
-    digest told you to apply for yourself. For each job it looks for the company's own careers page,
-    saves a report, and sends it to you on Telegram. It never applies, clicks or logs in anywhere.
+    Run the company-site job researcher (an AI agent with read-only tools) over the Part 1 jobs of the latest
+    digest, the ones you must apply for on the company's own site. For each it finds the careers page and
+    checks how applying will go, then emails you one summary. It never applies, clicks or logs in anywhere.
     """
     settings = get_settings()
     from naukri_agent.research_agent.runner import ResearchConfigError, run_research
+    from naukri_agent.research_agent.runner import wait_for_digest as wait_until_digest
 
+    if wait_for_digest:
+        click.echo("Waiting for today's daily run to finish...")
+        if not _explain_busy_database(lambda: wait_until_digest(settings)):
+            raise click.ClickException("Today's digest did not appear in time; nothing was researched.")
     notify = None
-    if not dry_run and settings.telegram_bot_token and settings.telegram_chat_id:
+    if telegram and not dry_run and settings.telegram_bot_token and settings.telegram_chat_id:
         from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
 
         notify = build_telegram_interaction(settings).notify
+    send_email = None
+    if settings.research_email and not dry_run:
+        from naukri_agent.notifications.email import EmailMessage, build_email_sender
+
+        sender = build_email_sender(settings)
+        send_email = lambda subject, body: sender.send(EmailMessage(subject=subject, text_body=body))  # noqa: E731
     try:
         result = _explain_busy_database(
-            lambda: run_research(settings, notify=notify, max_jobs=max_jobs, job_id=job_id, dry_run=dry_run)
+            lambda: run_research(settings, notify=notify, email=send_email, max_jobs=max_jobs, job_id=job_id, dry_run=dry_run)
         )
     except ResearchConfigError as exc:
         raise click.ClickException(str(exc))

@@ -106,7 +106,31 @@ def fetch_job_detail(page: Any, url: str) -> JobDetail:
         ld_json_skills=ld_json_skills,
         key_skills_dom=key_skills_dom,
         apply_type=_known_apply_type(page),
+        employment_type_text=read_employment_type(page),
     )
+
+
+_EMPLOYMENT_TYPE_JS = r"""
+() => {
+  const lines = (document.body ? document.body.innerText : '').split('\n').map(s => s.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^employment type\s*:?\s*(.*)$/i);
+    if (m) return (m[1] || lines[i + 1] || '').slice(0, 80) || null;
+  }
+  return null;
+}
+"""
+
+
+def read_employment_type(page: Any) -> str | None:
+    """READ-ONLY: Naukri's own 'Employment Type' line on the job page already loaded (for example
+    'Full Time, Permanent'), or None when the page shows none or cannot be read."""
+    try:
+        value = page.evaluate(_EMPLOYMENT_TYPE_JS)
+    except Exception as exc:  # noqa: BLE001 - a miss must never fail the job
+        logger.debug("read_employment_type raised %s", type(exc).__name__)
+        return None
+    return _clean(value) if isinstance(value, str) and value.strip() else None
 
 
 def _known_apply_type(page: Any) -> str | None:

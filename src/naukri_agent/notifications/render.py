@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from naukri_agent.config import Settings
 from naukri_agent.notifications.email import EmailMessage
+from naukri_agent.recommendations.employment import describe
 from naukri_agent.recommendations.models import Recommendation, RecommendationDigest
 
 
@@ -41,11 +42,16 @@ def _apply_line(rec: Recommendation) -> str | None:
     return None
 
 
+def _type_line(rec: Recommendation) -> str:
+    return f"   Job type: {describe(rec.employment_type_text)}"
+
+
 def _block(rec: Recommendation) -> str:
     lines = [
         f"{rec.rank}. {rec.job_title} — {rec.company}",
         f"   Location: {rec.location or 'Not stated'}",
         f"   Experience: {_experience(rec)}",
+        _type_line(rec),
         f"   Salary: {_salary(rec)}",
         f"   Match score: {rec.match_score:.1f} / 100 ({rec.match_decision.value})",
         f"   Recommended resume: {rec.recommended_resume_id or 'review needed'}"
@@ -116,6 +122,8 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
             )
     else:
         part1.append("None today.")
+    if digest.type_excluded:
+        part1.append(f"Left out: {digest.type_excluded} contract, temporary or part-time job(s) (Naukri's Employment Type).")
     for note in digest.notes:
         part1.append(f"Note: {note}")
 
@@ -127,6 +135,12 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
         part2.append("Nothing was applied via Telegram since the last digest.")
 
     sections = [f"Daily Naukri job digest — {date_str}"]
+    if digest.daily_total:
+        sections.append(
+            f"Today's plan (at most {digest.daily_total} jobs): up to {digest.telegram_slots} through Telegram, "
+            f"up to {digest.part1_limit} to apply yourself on the company's site."
+            + (f" Only jobs scoring {digest.min_score:g} or more are listed, so fewer is normal." if digest.min_score else "")
+        )
     if digest.profile_refresh_note:
         sections.append(digest.profile_refresh_note)
     sections.append("\n".join(part1))
@@ -136,7 +150,8 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
         s = "" if digest.native_waiting == 1 else "s"
         sections.append(
             f"{digest.native_waiting} more matching job{s} with a Naukri Apply button "
-            f"{'is' if digest.native_waiting == 1 else 'are'} waiting for you. Run: naukri-agent telegram-apply"
+            f"{'is' if digest.native_waiting == 1 else 'are'} ready for Telegram "
+            f"(you can approve up to {digest.telegram_slots} today). Run: naukri-agent telegram-apply"
         )
     body = "\n\n".join(sections) + (
         "\n\n---\n"

@@ -178,15 +178,15 @@ def html_to_page(html: str, base_url: str) -> tuple[str, str, list[tuple[str, st
     return " ".join(parser.title.split())[:150], text, links
 
 
-def fetch_page(
+def _download(
     url: str,
     *,
-    client: httpx.Client | None = None,
-    max_bytes: int = 300_000,
-    timeout: float = 15.0,
-    resolver: Callable[..., Any] = socket.getaddrinfo,
-) -> FetchedPage:
-    """GET one public https page and return its text. Raises UnsafeUrlError or FetchError."""
+    client: httpx.Client | None,
+    max_bytes: int,
+    timeout: float,
+    resolver: Callable[..., Any],
+) -> tuple[str, str, str, bool]:
+    """GET one public https page, with every guard. Returns (final_url, text, content_type, truncated)."""
     own = client is None
     http = client or httpx.Client(timeout=timeout, headers={"User-Agent": USER_AGENT, "Accept": "text/html,text/plain;q=0.9"})
     try:
@@ -213,17 +213,44 @@ def fetch_page(
                             truncated = True
                             del body[max_bytes:]
                             break
-                    html = bytes(body).decode(resp.encoding or "utf-8", errors="replace")
+                    text = bytes(body).decode(resp.encoding or "utf-8", errors="replace")
             except httpx.HTTPError as exc:
                 raise FetchError(f"network error ({type(exc).__name__})") from exc
-            if ctype == "text/plain":
-                return FetchedPage(url=current, title="", text=" ".join(html.split())[:_TEXT_CHARS], truncated=truncated)
-            title, text, links = html_to_page(html, current)
-            return FetchedPage(url=current, title=title, text=text, links=links, truncated=truncated)
+            return current, text, ctype, truncated
         raise FetchError("too many redirects")
     finally:
         if own:
             http.close()
+
+
+def fetch_page(
+    url: str,
+    *,
+    client: httpx.Client | None = None,
+    max_bytes: int = 300_000,
+    timeout: float = 15.0,
+    resolver: Callable[..., Any] = socket.getaddrinfo,
+) -> FetchedPage:
+    """GET one public https page and return its text. Raises UnsafeUrlError or FetchError."""
+    current, html, ctype, truncated = _download(url, client=client, max_bytes=max_bytes, timeout=timeout, resolver=resolver)
+    if ctype == "text/plain":
+        return FetchedPage(url=current, title="", text=" ".join(html.split())[:_TEXT_CHARS], truncated=truncated)
+    title, text, links = html_to_page(html, current)
+    return FetchedPage(url=current, title=title, text=text, links=links, truncated=truncated)
+
+
+def fetch_raw(
+    url: str,
+    *,
+    client: httpx.Client | None = None,
+    max_bytes: int = 400_000,
+    timeout: float = 15.0,
+    resolver: Callable[..., Any] = socket.getaddrinfo,
+) -> tuple[str, str]:
+    """Same guards as fetch_page, but returns (final_url, the page's raw HTML). Used to recognise which
+    application system a careers page uses; the HTML is searched by code and never shown to the model."""
+    current, html, _ctype, _truncated = _download(url, client=client, max_bytes=max_bytes, timeout=timeout, resolver=resolver)
+    return current, html
 
 
 # --- web search ------------------------------------------------------------------------------------------------------------

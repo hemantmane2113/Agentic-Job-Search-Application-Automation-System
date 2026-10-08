@@ -86,7 +86,8 @@ def go(tmp_path, factory, script, *, notify=None, search="default", reader=None,
     result = run_research(
         cfg(tmp_path), session_factory=factory, chat_client=client,
         search=FakeSearch() if search == "default" else search,
-        fetch=lambda url: page(url), reader=rd, notify=notify, now=NOW, **kw,
+        fetch=lambda url: page(url), reader=rd, notify=notify, now=NOW,
+        fetch_raw_fn=lambda url: (url, "<html><p>careers</p></html>"), **kw,  # no real network in tests
     )
     return result, rd, client
 

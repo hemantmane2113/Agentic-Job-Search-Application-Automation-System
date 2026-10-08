@@ -20,7 +20,7 @@ def test_auto_apply_command_refuses_and_exits_2_unless_every_switch_is_on(monkey
 def test_auto_apply_defaults_are_off_and_conservative():
     s = Settings(_env_file=None)
     assert s.auto_apply is False and s.dry_run is True and s.auto_apply_unattended is False
-    assert s.auto_apply_daily_cap == 3 and s.auto_apply_decisions == ["ACCEPT"]
+    assert s.auto_apply_daily_cap == 4 and s.auto_apply_decisions == ["ACCEPT"]
 
 
 def test_capture_reset_forgets_the_previous_jobs_apply_init_response():

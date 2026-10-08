@@ -125,6 +125,8 @@ def upsert_job(
         existing.posted_date_text = job.posted_date_text
         if job.apply_type is not None:
             existing.apply_type = job.apply_type
+        if job.employment_type_text is not None:
+            existing.employment_type_text = job.employment_type_text
         existing.content_fingerprint = fingerprint
         existing.last_seen_at = now
         existing.times_seen += 1
@@ -159,6 +161,7 @@ def upsert_job(
         posted_date_text=job.posted_date_text,
         source=job.source,
         apply_type=job.apply_type,
+        employment_type_text=job.employment_type_text,
         content_fingerprint=fingerprint,
         repost_of_job_id=repost_of.id if repost_of is not None else None,
         discovered_at=now,
@@ -1017,3 +1020,17 @@ def job_ids_researched_since(session: Session, since: "datetime.datetime") -> se
         .all()
     )
     return {r[0] for r in rows}
+
+
+def research_tokens_since(session: Session, since: "datetime.datetime") -> int:
+    """Model tokens (prompt + completion) the researcher used at or after `since`."""
+    from sqlalchemy import func
+
+    from naukri_agent.database.models import JobResearch
+
+    total = (
+        session.query(func.coalesce(func.sum(JobResearch.prompt_tokens + JobResearch.completion_tokens), 0))
+        .filter(JobResearch.created_at >= _naive_utc(since))
+        .scalar()
+    )
+    return int(total or 0)

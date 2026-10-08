@@ -64,6 +64,8 @@ class Recommendation(BaseModel):
     naukri_url: str  # ALWAYS from Job.url
     # "native" | "company_site" | "none" | None (not yet checked) -- from Job.apply_type
     apply_type: str | None = None
+    # Naukri's own Employment Type line (e.g. 'Full Time, Permanent'); None = the page showed none
+    employment_type_text: str | None = None
 
 
 class AppliedViaAgent(BaseModel):
@@ -93,6 +95,11 @@ class RecommendationDigest(BaseModel):
     # Part 2 = `applied_via_agent`. Off by default so the original single-list layout and
     # its tests are untouched.
     two_part: bool = False
+    telegram_slots: int = 0  # Naukri-Apply applications planned for today (they share the daily budget)
+    part1_limit: int | None = None  # how many 'apply yourself' jobs today's budget allows
+    daily_total: int = 0
+    min_score: float | None = None
+    type_excluded: int = 0  # contract / temporary / part-time jobs left out of this digest
     profile_refresh_note: str | None = None  # what the day's first step (profile refresh) did
     native_waiting: int = 0  # eligible jobs with a Naukri Apply button, left for telegram-apply
     applied_via_agent: list[AppliedViaAgent] = Field(default_factory=list)

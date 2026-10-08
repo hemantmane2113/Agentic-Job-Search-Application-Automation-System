@@ -63,7 +63,7 @@ def test_the_phone_is_told_which_jobs_are_ready_and_nothing_is_applied(tmp_path)
     text = sent[0]
     assert "2 job(s) ready to apply via Telegram" in text
     assert "ds role - Acme" in text and "mle role - Acme" in text and "resume " in text
-    assert "up to 3 today" in text and "nothing is applied until you tap Yes" in text
+    assert "up to 4 today" in text and "nothing is applied until you tap Yes" in text
     assert "http" not in text  # no links or credentials in a chat message
     assert events(factory, "telegram_ping") == [("OK", {"jobs": 2})]
 

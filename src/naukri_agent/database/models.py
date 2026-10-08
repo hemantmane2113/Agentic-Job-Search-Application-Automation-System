@@ -136,6 +136,8 @@ class Job(Base):
     # How the listing can be applied to, as last seen on its page: "native"
     # (Naukri Apply button), "company_site", "none", or NULL (never checked).
     apply_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Naukri's own 'Employment Type' text (e.g. 'Full Time, Permanent'); NULL = not shown / not read yet.
+    employment_type_text: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     # Sighting bookkeeping
     discovered_at: Mapped[datetime.datetime] = mapped_column(

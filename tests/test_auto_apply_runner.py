@@ -54,6 +54,9 @@ class FakeClient:
     def detect_apply_type(self):
         return self._p().get("type", "native")
 
+    def read_employment_type(self):
+        return self._p().get("employment")  # None = the page shows none
+
     def prepare_next_application(self):
         pass
 

@@ -68,6 +68,7 @@ class JobCreate(BaseModel):
     posted_date_text: str | None = None
     source: str = "naukri"
     apply_type: str | None = None  # "native" | "company_site" | "none"
+    employment_type_text: str | None = None  # Naukri's own Employment Type line
 
 
 class JobExtractionCreate(BaseModel):

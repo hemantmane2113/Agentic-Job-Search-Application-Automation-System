@@ -37,7 +37,9 @@ from typing import Any, Callable, Iterator
 
 from pydantic import BaseModel, Field
 
+from naukri_agent.browser.pacing import pause
 from naukri_agent.config import Settings
+from naukri_agent.recommendations.employment import is_excluded
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ class AutoApplyOutcome(BaseModel):
     title: str
     company: str
     url: str
-    outcome: str  # applied | needs_human | unconfirmed | failed | not_native
+    outcome: str  # applied | needs_human | unconfirmed | failed | not_native | excluded_type
     detail: str = ""
     questions: list[str] = Field(default_factory=list)
     answers: list[str] = Field(default_factory=list)
@@ -125,6 +127,8 @@ def _status_line(o: AutoApplyOutcome) -> str | None:
         return f"An error stopped the run on: {head} ({o.detail}). Nothing further was done."
     if o.outcome == "not_native":
         return f"Skipped - this job no longer has a Naukri Apply button, so ignore the question above: {head}"
+    if o.outcome == "excluded_type":
+        return f"Skipped - Naukri lists this job as not full-time permanent ({o.detail}), so ignore the question above: {head}"
     return None
 
 
@@ -266,6 +270,12 @@ def run_auto_apply(
                     if client.detect_apply_type() != "native":
                         record(job, attempt_id, "not_native", "no Naukri Apply button on the page now")
                         continue
+                    # Naukri's own Employment Type, read from the page that is open (older stored jobs may
+                    # not have it yet). Contract / temporary / part-time jobs are never offered for applying.
+                    live_type = client.read_employment_type()
+                    if is_excluded(live_type, settings.employment_filter_enabled, title=job["title"]):
+                        record(job, attempt_id, "excluded_type", f"Naukri says: {live_type}")
+                        continue
 
                     if interaction is not None:
                         approved = interaction.wait_approval()
@@ -290,6 +300,7 @@ def run_auto_apply(
                         on_profile = job["resume_id"]
                         client.open_job_page(job["url"])  # the resume check left the job page
                     client.prepare_next_application()
+                    pause(settings.apply_pause_min_seconds, settings.apply_pause_max_seconds)
                     client.click_apply()
                     questions = client.list_questions()
                     fields = client.application_question_field_count() if not questions else 0

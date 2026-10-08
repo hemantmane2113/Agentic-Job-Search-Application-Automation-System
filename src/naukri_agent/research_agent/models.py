@@ -37,6 +37,10 @@ class ResearchReport(BaseModel):
     lists_this_role: Literal["yes", "no", "unknown"] = "unknown"
     red_flags: list[str] = Field(default_factory=list)
     differences: list[str] = Field(default_factory=list)  # where the company's page disagrees with the Naukri post
+    # How applying will go (a standard form, an account login, a LinkedIn link, email...), worked out by
+    # code from the careers page itself, never by the model.
+    apply_method: str | None = None
+    apply_note: str | None = None
     sources: list[str] = Field(default_factory=list)  # pages the agent really fetched
     notes: list[str] = Field(default_factory=list)  # what code changed or could not check
 

@@ -16,6 +16,7 @@ import re
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from naukri_agent.browser.pacing import pause
 from naukri_agent.candidate.models import CandidateProfile
 from naukri_agent.config import Settings
 from naukri_agent.database.models import RunEventStatus
@@ -198,6 +199,8 @@ def discover_and_store(
 
     for q in matrix:
         queries_run += 1
+        if queries_run > 1:
+            pause(settings.browse_pause_min_seconds, settings.browse_pause_max_seconds)
         try:
             summaries = client.search_jobs(q.role, q.location)
         except Exception as exc:  # noqa: BLE001
@@ -295,7 +298,11 @@ def discover_and_store(
     details_failed = 0
     job_ids: list[int] = []
 
+    first_page = True
     for url in ordered_unique:
+        if not first_page:
+            pause(settings.browse_pause_min_seconds, settings.browse_pause_max_seconds)
+        first_page = False
         try:
             detail = client.fetch_job_detail(url)
         except Exception as exc:  # noqa: BLE001
@@ -321,6 +328,7 @@ def discover_and_store(
             posted_date_text=detail.posted_date_text,
             source=detail.source,
             apply_type=detail.apply_type,
+            employment_type_text=detail.employment_type_text,
         )
         job, created = upsert_job(session, job_create, run_id=run_id)
         # Raw skill evidence (ld+json `skills` / Key Skills DOM chips) --

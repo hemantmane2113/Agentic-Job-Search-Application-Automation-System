@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from naukri_agent.config import Settings
+from naukri_agent.recommendations.employment import is_excluded
 
 _MATCHED_RE = re.compile(r"^(?P<skill>.+?) (?P<kind>required|preferred) skill matched")
 _MISSING_RE = re.compile(r"^(?P<skill>.+?) (?P<kind>required|preferred) but not present$")
@@ -66,6 +67,8 @@ def select_candidates(session: Any, candidate_id: int, settings: Settings, now: 
     for match, job in rows:
         if job.id in skip:
             continue
+        if is_excluded(job.employment_type_text, settings.employment_filter_enabled, title=job.title):
+            continue
         if application_status_for_job(session, job.id).name in excluded:
             continue
         extraction = session.get(JobExtraction, match.job_extraction_id)
@@ -78,6 +81,7 @@ def select_candidates(session: Any, candidate_id: int, settings: Settings, now: 
         picked.append(
             {"job_id": job.id, "title": job.title, "company": job.company, "url": job.url,
              "score": match.overall_score,
+             "employment_type_text": job.employment_type_text,
              "resume_id": chosen.resume_id if chosen else None,
              "resume_file": chosen.file_path if chosen else None,
              "resume_hash": chosen.file_hash if chosen else None,

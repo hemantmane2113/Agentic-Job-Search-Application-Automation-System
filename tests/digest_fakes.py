@@ -37,8 +37,19 @@ def settings(tmp_path, **over) -> Settings:
         recommendation_cooldown_days=30,
         threshold_review=50,
         threshold_accept=80,
+        browse_pause_min_seconds=0,
+        browse_pause_max_seconds=0,
+        apply_pause_min_seconds=0,
+        apply_pause_max_seconds=0,
     )
     base.update(over)
+    # These older tests were written for the previous rules (minimum score = the REVIEW threshold, REVIEW
+    # jobs included, newest bucket first). They state them explicitly so each keeps testing what it was
+    # written for. The NEW defaults (score >= 80, ACCEPT only, best score first) are tested on plain Settings
+    # in tests/test_top10_min80.py.
+    base.setdefault("recommendation_min_score", base["threshold_review"])
+    base.setdefault("recommendation_decisions", ["ACCEPT", "REVIEW"])
+    base.setdefault("recommendation_rank_freshness_first", True)
     return Settings(**base)
 
 

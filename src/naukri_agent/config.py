@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # `auto-apply` command only. Off by default: building the capability
     # applies to nothing until this is switched on deliberately.
     auto_apply_unattended: bool = False
-    auto_apply_daily_cap: int = 3  # rolling 24h, counts applied + unconfirmed
+    auto_apply_daily_cap: int = 4  # rolling 24h, counts applied + unconfirmed. The Telegram share of daily_job_total
     auto_apply_decisions: list[str] = Field(default_factory=lambda: ["ACCEPT"])
     auto_apply_max_job_age_days: int = 7
     # While this file exists, auto-apply refuses to run. A manual kill switch.
@@ -110,9 +110,13 @@ class Settings(BaseSettings):
     weight_skills: float = 35
     weight_experience: float = 20
     weight_role: float = 15
-    weight_salary: float = 15
-    weight_location: float = 10
+    weight_salary: float = 11
+    weight_location: float = 7
     weight_education: float = 5
+    # Posted recency: 7 marks if posted today, down to 1 for a job posted a week ago (see matching/recency_matcher.py).
+    # Salary and location gave up 4 and 3 marks for it: salary barely separated jobs (everyone got 10+ of 15) and
+    # location matches every job now that 22 cities are listed. The seven weights add up to 100.
+    weight_recency: float = 7
 
     # Overall-score thresholds (0-100) for the ACCEPT/REVIEW/REJECT
     # decision. Anything >= threshold_accept is ACCEPT; between
@@ -200,7 +204,16 @@ class Settings(BaseSettings):
     serper_api_key: str = ""  # https://serper.dev  (has a free starter allowance)
     brave_api_key: str = ""  # https://api.search.brave.com  (now a paid plan)
     research_search_provider: str = "auto"  # auto | serper | brave | none
-    research_max_jobs: int = 5  # jobs researched per command
+    # Keep only full-time, permanent jobs (Naukri's own Employment Type field). A job with no such field is
+    # kept and marked 'not confirmed'. Off = no filtering.
+    employment_filter_enabled: bool = True
+    research_email: bool = True  # send the research as one email (to NOTIFY_EMAIL_TO) when research-jobs runs
+    research_wait_hours: float = 5.0  # `--wait-for-digest` gives up after this long
+    research_max_jobs: int = 10  # jobs researched per command (the digest itself holds at most 10)
+    # Groq's free plan allows 200,000 tokens a day. Stop starting new jobs once this many were used in the
+    # last 24 hours (a job takes roughly 12-16k), so the last job is never begun just to hit the wall.
+    research_daily_token_budget: int = 180_000
+    research_tokens_per_job_estimate: int = 16_000
     research_max_steps: int = 8  # model turns per job, then it must submit what it has
     research_max_fetches: int = 5  # web pages read per job
     research_max_searches: int = 3  # web searches per job
@@ -232,10 +245,21 @@ class Settings(BaseSettings):
     # --- Daily recommendation digest (scope change: read-only match digest) ---
     # DB is the source of truth; Excel is a regenerated mirror; the LLM
     # never determines score / application status / freshness / URLs.
-    daily_recommendation_limit: int = 10
+    daily_recommendation_limit: int = 10  # hard ceiling for the 'apply yourself' list
+    # ONE daily budget across both kinds of job: up to auto_apply_daily_cap through Telegram (Naukri Apply)
+    # and the rest to apply for yourself on the company's site. Unused Telegram slots go to the other list.
+    daily_job_total: int = 10
+    # Random pauses (seconds) between page loads in discovery, and before an apply click. 0 turns them off.
+    browse_pause_min_seconds: float = 3.0
+    browse_pause_max_seconds: float = 8.0
+    apply_pause_min_seconds: float = 2.0
+    apply_pause_max_seconds: float = 5.0
     # Minimum overall_score (0-100) for a match to be eligible for the
-    # email. None -> fall back to threshold_review.
+    # email. None -> fall back to threshold_accept (80): only ACCEPT-level jobs are listed.
     recommendation_min_score: float | None = None
+    # Order of the digest: True = newest bucket first, then score (the old behaviour); False (default) =
+    # highest score first, so the 'top 10' really are the 10 best-scoring jobs.
+    recommendation_rank_freshness_first: bool = False
     # A previously-recommended-but-NOT-APPLIED job is eligible again:
     #   0   -> next run (no cooldown)
     #   > 0 -> only after this many days since the last recommendation
@@ -247,7 +271,7 @@ class Settings(BaseSettings):
     )
     # MatchDecisions eligible for the digest.
     recommendation_decisions: list[str] = Field(
-        default_factory=lambda: ["ACCEPT", "REVIEW"]
+        default_factory=lambda: ["ACCEPT"]  # REVIEW (70-79) jobs are left out; fewer than 10 a day is fine
     )
     # A job first seen within this many days, never recommended, is
     # labelled "Newly discovered".
@@ -271,7 +295,7 @@ class Settings(BaseSettings):
     # than daily_recommendation_limit (the final digest cap) so the top-10
     # matches can be found without the V1 175-200-job / multi-hour parse.
     discovery_freshness_days: int = 7
-    discovery_fresh_job_limit: int = 60
+    discovery_fresh_job_limit: int = 50
 
     # --- Manual application recording ---
     mark_applied_default_status: str = "APPLIED"
