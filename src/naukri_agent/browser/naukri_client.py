@@ -55,6 +55,10 @@ class NaukriClient(JobBoardClient):
         """WRITE: replace the profile's resume with `path` (also refreshes 'last updated')."""
         return _profile.upload_resume(self._page, path)
 
+    def ensure_profile_resume(self, path: Any) -> ResumeUploadResult:
+        """WRITE (only if needed): make the profile's resume the file at `path` before applying."""
+        return _profile.ensure_resume(self._page, path)
+
     def search_jobs(self, query: str, location: str = "") -> list[JobListingSummary]:
         return _jobs.search_jobs(self._page, query, location)
 

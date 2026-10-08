@@ -57,6 +57,7 @@ def format_job_card(job: dict) -> str:
         job["company"],
         f"Match score: {job['score']:.1f}",
         exp_line,
+        "Resume: " + (job["resume_id"] if job.get("resume_id") else "none matched - the one already on your profile"),
         "",
     ]
     skill_lines = [

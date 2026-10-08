@@ -53,6 +53,7 @@ class AutoApplyOutcome(BaseModel):
     detail: str = ""
     questions: list[str] = Field(default_factory=list)
     answers: list[str] = Field(default_factory=list)
+    resume_id: str | None = None  # the resume this application went out with
 
 
 class AutoApplyRunResult(BaseModel):
@@ -108,8 +109,9 @@ def check_gates(settings: Settings, interactive: bool = False) -> str | None:
 
 def select_candidates(session: Any, candidate_id: int, settings: Settings, now: datetime.datetime) -> list[dict]:
     """Eligible jobs, best score first. Pure DB reads."""
-    from naukri_agent.database.models import Job, JobExtraction, JobMatch
+    from naukri_agent.database.models import Job, JobExtraction, JobMatch, ResumeSelection
     from naukri_agent.database.repositories import application_status_for_job, auto_apply_job_ids_to_skip
+    from naukri_agent.resume.selector import ResumeSelectionDecision
     from naukri_agent.matching.models import MatchDecision
 
     decisions = [MatchDecision(d.upper()) for d in settings.auto_apply_decisions]
@@ -138,9 +140,18 @@ def select_candidates(session: Any, candidate_id: int, settings: Settings, now: 
         if application_status_for_job(session, job.id).name in excluded:
             continue
         extraction = session.get(JobExtraction, match.job_extraction_id)
+        # The resume chosen for this job's role (one of the user's own three). None = no role match.
+        chosen = (
+            session.query(ResumeSelection)
+            .filter_by(candidate_id=candidate_id, job_id=job.id, decision=ResumeSelectionDecision.SELECTED)
+            .one_or_none()
+        )
         picked.append(
             {"job_id": job.id, "title": job.title, "company": job.company, "url": job.url,
              "score": match.overall_score,
+             "resume_id": chosen.resume_id if chosen else None,
+             "resume_file": chosen.file_path if chosen else None,
+             "resume_hash": chosen.file_hash if chosen else None,
              "experience_text": job.experience_text,
              "experience_min": extraction.experience_min if extraction else None,
              "experience_max": extraction.experience_max if extraction else None,
@@ -176,7 +187,8 @@ def _status_line(o: AutoApplyOutcome) -> str | None:
     head = f"{o.title} - {o.company}"
     if o.outcome == "applied":
         sent = "".join(f"\nQ: {q}\nA: {a}" for q, a in zip(o.questions, o.answers))
-        return f"Applied: {head}" + (f"\n\nAnswers sent:{sent}" if sent else "")
+        used = f"\nResume: {o.resume_id}" if o.resume_id else "\nResume: the one already on your profile (no role match)"
+        return f"Applied: {head}{used}" + (f"\n\nAnswers sent:{sent}" if sent else "")
     if o.outcome == PARKED_NEEDS_HUMAN:
         return f"NOT submitted - please finish this one yourself:\n{head}\n{o.url}\nWhy: {o.detail}"
     if o.outcome == "unconfirmed":
@@ -218,7 +230,7 @@ def _render_summary(result: AutoApplyRunResult) -> tuple[str, str]:
         for o in problems:
             lines.append(f"  - [{o.outcome}] {o.title} - {o.company}\n    {o.url}\n    {o.detail}")
         lines.append("")
-    lines.append("Applications from this command use Naukri's default profile resume.")
+    lines.append("Each application went out with the resume chosen for its role (put on your profile just before applying).")
     return subject, "\n".join(lines)
 
 
@@ -279,6 +291,7 @@ def run_auto_apply(
         item = AutoApplyOutcome(
             job_id=job["job_id"], title=job["title"], company=job["company"], url=job["url"],
             outcome=outcome, detail=detail, questions=list(questions), answers=list(answers),
+            resume_id=job.get("resume_id"),
         )
         result.outcomes.append(item)
         with session_scope(factory) as s:
@@ -309,6 +322,7 @@ def run_auto_apply(
         first = {**candidates[0], "your_years": candidate.years_experience}
         interaction.send_approval(first)
         pre_sent = first["job_id"]
+    on_profile: str | None = None  # resume id verified on the Naukri profile during this run
     try:
         with (open_client or _open_naukri_client)(settings) as client:
             for job in candidates[:max_attempts]:
@@ -335,6 +349,18 @@ def run_auto_apply(
                             record(job, attempt_id, "declined", "you said no")
                             continue
 
+                    # Naukri applies with the profile's CURRENT resume, so put the one chosen for this
+                    # job's role there first (only after the Yes: a "no" never touches the profile).
+                    # If it cannot be confirmed, nothing is applied - never the wrong resume.
+                    if job.get("resume_file") and on_profile != job.get("resume_id"):
+                        placed = client.ensure_profile_resume(job["resume_file"])
+                        if not placed.verified:
+                            record(job, attempt_id, "failed",
+                                   f"could not put the {job.get('resume_id')} resume on the profile; nothing was applied")
+                            result.stopped_reason = "could not set the resume; stopped (nothing applied with a wrong resume)"
+                            break
+                        on_profile = job["resume_id"]
+                        client.open_job_page(job["url"])  # the resume check left the job page
                     client.prepare_next_application()
                     client.click_apply()
                     questions = client.list_questions()
@@ -411,7 +437,12 @@ def run_auto_apply(
                         row, _ = upsert_application_history(
                             s, job["job_id"],
                             source="agent_auto_apply_telegram" if interaction is not None else "agent_auto_apply_unattended",
-                            note="Applied unattended by naukri-agent auto-apply; Naukri used the profile default resume. "
+                            resume_id=job.get("resume_id"),
+                            resume_file_path=job.get("resume_file"),
+                            resume_file_hash=job.get("resume_hash"),
+                            note="Applied by naukri-agent auto-apply. "
+                                 + (f"Resume {job['resume_id']} was put on the profile first. " if job.get("resume_id")
+                                    else "No resume matched this role; the resume already on the profile was used. ")
                                  + "; ".join(submission.notes),
                         )
                         history_id = row.id

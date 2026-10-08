@@ -44,6 +44,7 @@ class ResumeUploadResult(BaseModel):
     after_filename: str | None = None
     after_updated: str | None = None
     verified: bool = False  # the profile (after a reload) shows the uploaded file
+    changed: bool = True  # False when the right file was already on the profile (nothing uploaded)
     note: str | None = None
 
 

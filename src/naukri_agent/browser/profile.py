@@ -88,3 +88,28 @@ def upload_resume(page: Any, path: Any) -> ResumeUploadResult:
         before_filename=before_name, before_updated=before_updated,
         after_filename=after_name, after_updated=after_updated, verified=verified, note=note,
     )
+
+
+def ensure_resume(page: Any, path: Any) -> ResumeUploadResult:
+    """
+    Make sure the profile's resume IS `path`'s file, uploading only if it is not. Naukri applies
+    with the profile's current resume, so this runs right before an application, to make that
+    application carry the resume chosen for the job's role. Reads first, so a resume that is
+    already in place costs one page load and changes nothing.
+    """
+    from pathlib import Path
+
+    file_path = Path(path)
+    page.goto(selectors.PROFILE_URL)
+    page.wait_for_load_state("domcontentloaded", timeout=30000)
+    try:
+        page.wait_for_selector(selectors.RESUME_FILENAME, state="attached", timeout=_FILENAME_WAIT_MS)
+    except Exception as exc:  # noqa: BLE001 - fall through: upload_resume reports what it sees
+        logger.debug("resume filename not visible before check: %s", exc)
+    name, updated = _read_resume_section(page)
+    if name and _norm(file_path.stem) in _norm(name):
+        return ResumeUploadResult(
+            before_filename=name, before_updated=updated, after_filename=name, after_updated=updated,
+            verified=True, changed=False, note="already on the profile",
+        )
+    return upload_resume(page, file_path)
