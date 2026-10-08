@@ -331,6 +331,23 @@ def apply_(job: str, reuse_session: bool) -> None:
         sys.exit(1)
 
 
+def _explain_busy_database(fn):
+    """Run fn(); turn SQLite's "database is locked" into a plain message. The daily
+    run holds the database for its whole duration, so apply commands started while
+    it is still going fail at their first query, before touching Naukri."""
+    from sqlalchemy.exc import OperationalError
+
+    try:
+        return fn()
+    except OperationalError as exc:
+        if "database is locked" in str(exc).lower():
+            raise click.ClickException(
+                "The database is busy - the daily run is probably still going. Wait until it "
+                "finishes, then run this again. Nothing was opened and nothing was applied."
+            )
+        raise
+
+
 @cli.command("auto-apply")
 def auto_apply_cmd() -> None:
     """
@@ -344,7 +361,7 @@ def auto_apply_cmd() -> None:
     """
     from naukri_agent.orchestration.auto_apply_runner import run_auto_apply
 
-    result = run_auto_apply(get_settings())
+    result = _explain_busy_database(lambda: run_auto_apply(get_settings()))
     click.echo(json.dumps(result.model_dump(), indent=2, default=str))
     if result.blocked_reason:
         sys.exit(2)
@@ -406,7 +423,7 @@ def telegram_apply() -> None:
     except ValueError as exc:
         raise click.ClickException(str(exc))
 
-    result = run_auto_apply(settings, interaction=interaction)
+    result = _explain_busy_database(lambda: run_auto_apply(settings, interaction=interaction))
     if not result.blocked_reason:
         interaction.notify(
             f"Run finished: {result.applied} applied, {len(result.outcomes)} job(s) handled."
