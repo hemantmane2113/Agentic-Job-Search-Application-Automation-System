@@ -40,6 +40,12 @@ def is_marked_applied(page: Any, wait_ms: int = 0) -> bool:
     return False
 
 
+def question_panel_open(page: Any, applied_wait_ms: int = 4000) -> bool:
+    """True if Naukri's recruiter-question panel is on screen and the job is NOT
+    already marked Applied (a question-free job may flash a panel as it submits)."""
+    return _any_visible(page, selectors.APPLY_DRAWER) and not is_marked_applied(page, wait_ms=applied_wait_ms)
+
+
 def detect_apply_type(page: Any) -> str:
     """
     Never clicks or fills. "native" if a visible Naukri Apply button

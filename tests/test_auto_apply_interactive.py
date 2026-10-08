@@ -18,13 +18,15 @@ class FakeHuman:
     def __init__(self, approvals=(True,), answers=(), confirms=(True,)):
         self.approvals, self.answers, self.confirms = list(approvals), list(answers), list(confirms)
         self.asked, self.suggestions, self.confirmed_with, self.notes = [], [], [], []
+        self.options_seen = []
 
     def approve_job(self, job):
         self.asked.append(job["title"])
         return self.approvals.pop(0) if self.approvals else None
 
-    def ask_question(self, index, total, text, suggestion):
+    def ask_question(self, index, total, text, suggestion, options=None):
         self.suggestions.append(suggestion)
+        self.options_seen.append(options)
         return self.answers.pop(0) if self.answers else None
 
     def confirm_submit(self, job, questions, answers):

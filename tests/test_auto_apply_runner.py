@@ -66,6 +66,9 @@ class FakeClient:
     def application_question_field_count(self):
         return self._p().get("fields", 0)
 
+    def question_panel_open(self):
+        return self._p().get("panel", False)
+
     def submit_answer(self, control_id, answer):
         self.answered.append((self.url, control_id, answer))
 

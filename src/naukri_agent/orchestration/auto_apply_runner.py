@@ -327,27 +327,35 @@ def run_auto_apply(
 
                     texts = [q.question_text for q in questions]
                     answers = [answer_from_profile(t, candidate, experience) for t in texts]
+                    panel = bool(client.question_panel_open()) if not questions else False
                     unreadable = (
-                        "the application screen shows input fields the app could not read"
-                        if fields > 0 else "the application screen could not be read"
+                        "a question panel opened but its questions could not be read"
+                        if panel
+                        else "the application screen shows input fields the app could not read"
+                        if fields > 0
+                        else "the application screen could not be read"
                     )
                     if interaction is None:
-                        refused = [(t, a.basis) for t, a in zip(texts, answers) if a.answer is None]
+                        refused = [
+                            (t, a.basis if a.answer is None else "the profile answer is not one of the offered options")
+                            for q, t, a in zip(questions, texts, answers)
+                            if a.answer is None or (q.options and a.answer not in q.options)
+                        ]
                         if refused:
                             why = "; ".join(f"{t!r}: {b}" for t, b in refused)
                             record(job, attempt_id, PARKED_NEEDS_HUMAN, "cannot answer with certainty - " + why, texts)
                             continue
-                        if not questions and fields != 0:
+                        if not questions and (fields != 0 or panel):
                             record(job, attempt_id, PARKED_NEEDS_HUMAN, unreadable)
                             continue
                         final_answers = [a.answer or "" for a in answers]
                     else:
-                        if not questions and fields != 0:
+                        if not questions and (fields != 0 or panel):
                             record(job, attempt_id, PARKED_NEEDS_HUMAN, unreadable)
                             continue
                         final_answers = []
-                        for i, (t, a) in enumerate(zip(texts, answers), start=1):
-                            reply = interaction.ask_question(i, len(texts), t, a.answer)
+                        for i, (q, t, a) in enumerate(zip(questions, texts, answers), start=1):
+                            reply = interaction.ask_question(i, len(texts), t, a.answer, options=list(q.options))
                             if reply is None:
                                 break
                             final_answers.append(reply)

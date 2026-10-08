@@ -394,6 +394,10 @@ class ApplyQuestionPrompt(BaseModel):
     # observed in a live run; see CLAUDE.md's open-risk notes. Treat as
     # provisional until confirmed against a real apply-init response.
     skippable: bool = False
+    # Answer choices for radio / single-select questions (empty for free text).
+    # The answer MUST be one of these exactly.
+    options: list[str] = Field(default_factory=list)
+    question_type: str | None = None  # e.g. "Radio Button"
 
 
 class ApplySubmissionResult(BaseModel):

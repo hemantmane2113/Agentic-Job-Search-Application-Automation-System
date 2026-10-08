@@ -81,7 +81,17 @@ class TelegramInteraction:
     def approve_job(self, job: dict) -> bool | None:
         return self._ch.ask_yes_no(format_job_card(job), self._approve_s)
 
-    def ask_question(self, index: int, total: int, text: str, suggestion: str | None) -> str | None:
+    def ask_question(
+        self, index: int, total: int, text: str, suggestion: str | None, options: list[str] | None = None
+    ) -> str | None:
+        if options:  # a choice question: tap one of the offered answers
+            hint = f"\n\nFrom your profile I'd answer: {suggestion}" if suggestion in options else ""
+            reply = self._ch.ask_choice(
+                f"Question {index}/{total}:\n{text}{hint}\n\nTap an answer (or send {STOP_WORD} to give up on this job).",
+                list(options),
+                self._answer_s,
+            )
+            return None if reply is None or reply == STOP_WORD else reply
         hint = (
             f"\n\nFrom your profile I'd answer: {suggestion}\nReply {ACCEPT_SUGGESTION} to use that, or type your own answer."
             if suggestion

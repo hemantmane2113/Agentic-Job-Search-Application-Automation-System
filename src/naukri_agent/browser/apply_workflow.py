@@ -60,8 +60,13 @@ _LIST_QUESTIONS_POLL_COUNT = 6
 _LIST_QUESTIONS_POLL_INTERVAL_MS = 500
 _APPLIED_POLL_COUNT = 12
 _APPLIED_MARKER_WAIT_MS = 8000
+_CHOICE_POLL_COUNT = 10
 _APPLIED_POLL_INTERVAL_MS = 1000
 _APPLIED_TEXT_RE = re.compile(r"applied|application (has been )?(sent|submitted)", re.I)
+
+
+class ApplyAnswerError(Exception):
+    """An answer could not be entered into the question panel (nothing was submitted)."""
 
 
 def _exact_path(raw: str) -> str:
@@ -95,6 +100,17 @@ def _parse_questionnaire(apply_init_body: dict) -> tuple[list[ApplyQuestionPromp
                 notes.append(f"found nested under {parent_key!r}.questionnaire")
                 break
 
+    jobs = apply_init_body.get("jobs")
+    if not candidates and isinstance(jobs, list):
+        # The REAL shape, captured live 2026-10-08 (job 374): jobs[].questionnaire[]
+        lists = [j["questionnaire"] for j in jobs if isinstance(j, dict) and isinstance(j.get("questionnaire"), list)]
+        if lists:
+            candidates = [item for lst in lists for item in lst]
+            notes.append("found under jobs[].questionnaire")
+            if not candidates:
+                notes.append("jobs[].questionnaire is empty: this application has no questions")
+                return [], notes
+
     if not candidates:
         notes.append(
             "could not locate a question list in the apply-init response body; "
@@ -119,7 +135,8 @@ def _parse_questionnaire(apply_init_body: dict) -> tuple[list[ApplyQuestionPromp
             continue
         qid = str(item.get("id") or item.get("questionId") or item.get("controlId") or i)
         qtext = (
-            item.get("questionText")
+            item.get("questionName")
+            or item.get("questionText")
             or item.get("question")
             or item.get("text")
             or item.get("label")
@@ -127,11 +144,19 @@ def _parse_questionnaire(apply_init_body: dict) -> tuple[list[ApplyQuestionPromp
         )
         if not qtext:
             continue
+        raw_options = item.get("answerOption")
+        options = (
+            [str(v) for _k, v in sorted(raw_options.items()) if v not in (None, "")]
+            if isinstance(raw_options, dict)
+            else []
+        )
         prompts.append(
             ApplyQuestionPrompt(
                 control_id=qid,
                 question_text=str(qtext),
-                skippable=qid in skippable_ids,
+                skippable=qid in skippable_ids or item.get("isMandatory") is False,
+                options=options,
+                question_type=(str(item["questionType"]) if item.get("questionType") else None),
             )
         )
     return prompts, notes
@@ -185,6 +210,7 @@ class ApplyWorkflowSession:
         self._blocker = MutatingRequestBlocker(allow_exact=_APPLY_INIT_ALLOWLIST)
         self._capture = _ApplyInitCapture()
         self._installed = False
+        self._known: dict[str, ApplyQuestionPrompt] = {}
 
     def _ensure_installed(self) -> None:
         if self._installed:
@@ -200,6 +226,7 @@ class ApplyWorkflowSession:
         would otherwise keep reading the first job's questions."""
         self._capture.body = None
         self._capture.notes = []
+        self._known = {}
 
     def click_apply(self) -> None:
         self._ensure_installed()
@@ -218,11 +245,42 @@ class ApplyWorkflowSession:
         prompts, notes = _parse_questionnaire(self._capture.body)
         for note in notes:
             logger.info("apply_workflow.list_questions: %s", note)
+        self._known = {p.control_id: p for p in prompts if p.control_id}
         return prompts
 
     def submit_answer(self, control_id: str, answer: str) -> None:
+        known = self._known.get(control_id)
+        if known is not None and known.options:
+            self._answer_choice(answer, known.options)
+            return
         self._page.fill(selectors.APPLY_ANSWER_INPUT, answer)
         self._page.click(selectors.APPLY_NEXT_BUTTON)
+
+    def _answer_choice(self, answer: str, options: list[str]) -> None:
+        """Pick one radio option in the question panel, then press its Save. Waits for
+        the option to be on screen (a following question appears after the previous
+        Save). Raises ApplyAnswerError, having clicked nothing, if the answer is not
+        an offered option or never appears."""
+        wanted = (answer or "").strip()
+        if wanted not in options:
+            raise ApplyAnswerError(f"{wanted!r} is not one of the offered options {options}")
+        label = None
+        for _ in range(_CHOICE_POLL_COUNT):
+            for handle in self._page.query_selector_all(selectors.APPLY_CHOICE_LABEL):
+                try:
+                    if handle.is_visible() and (handle.inner_text() or "").strip() == wanted:
+                        label = handle
+                        break
+                except Exception:  # noqa: BLE001 - a label mid-redraw is simply skipped
+                    continue
+            if label is not None:
+                break
+            self._page.wait_for_timeout(1000)
+        if label is None:
+            raise ApplyAnswerError(f"option {wanted!r} did not appear in the question panel")
+        label.click()
+        self._page.wait_for_timeout(400)  # Save is greyed out until an option is chosen
+        self._page.click(selectors.APPLY_DRAWER_SAVE)
 
     def skip_question(self, control_id: str) -> None:
         self._page.click(selectors.APPLY_SKIP_BUTTON)

@@ -136,6 +136,17 @@ COMPANY_SITE_APPLY_BUTTON = "#company-site-button"
 # click ITSELF submits, and there is no second submit button.
 ALREADY_APPLIED_MARKER = "#already-applied"
 
+# VERIFIED 2026-10-08 (job 374, a real "Will you be available for the Walk-in
+# interview..." question). Clicking Apply on a job with recruiter questions opens a
+# right-hand panel (it is NOT inside #chatbot-container, which stays empty). A
+# Yes/No question is two custom radios: `input.ssrc__radio` (value="Yes"/"No") plus
+# a clickable `label.ssrc__label` with the same text. The panel's "Save" button is
+# `.chatbot_Drawer .sendMsg`; its parent carries class `disabled` until an option
+# is chosen.
+APPLY_DRAWER = ".chatbot_Drawer"
+APPLY_CHOICE_LABEL = "label.ssrc__label"
+APPLY_DRAWER_SAVE = ".chatbot_Drawer .sendMsg"
+
 # UNVERIFIED. The pre-click capture proved these controls do NOT exist
 # before Apply is clicked (empty `<div id="chatbot-container"></div>` is
 # the only apply-related mount point). Kept for Stage 1's read-only

@@ -169,6 +169,36 @@ class TelegramChannel:
         self.send(text)
         return self._wait(timeout_s, lambda kind, value: value if kind == "text" and value else None)
 
+    def ask_choice(self, text: str, options: list[str], timeout_s: float) -> str | None:
+        """Send the options as tappable buttons; returns the chosen option exactly as
+        listed (a tap, or the option typed in any case), "/stop" if the user typed
+        that, or None on silence."""
+        self.drain()
+        keyboard = [[{"text": opt[:60], "callback_data": f"opt:{i}"}] for i, opt in enumerate(options)]
+        self._transport(
+            "sendMessage",
+            {"chat_id": self._chat_id, "text": text[:4000], "disable_web_page_preview": True,
+             "reply_markup": {"inline_keyboard": keyboard}},
+            30,
+        )
+
+        def accept(kind: str, value: str) -> str | None:
+            if kind == "button" and value.startswith("opt:"):
+                try:
+                    return options[int(value[4:])]
+                except (ValueError, IndexError):
+                    return None
+            if kind == "text":
+                low = value.strip().lower()
+                if low == "/stop":
+                    return "/stop"
+                for opt in options:
+                    if low == opt.lower():
+                        return opt
+            return None
+
+        return self._wait(timeout_s, accept)
+
     def discover_chat_id(self, timeout_s: float) -> str | None:
         """Setup helper: the chat id of the first person to message the bot."""
         deadline = self._clock() + timeout_s

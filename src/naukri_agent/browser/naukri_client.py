@@ -147,6 +147,11 @@ class NaukriClient(JobBoardClient):
         except Exception:  # noqa: BLE001 - a missing screenshot must never fail an application
             return False
 
+    def question_panel_open(self) -> bool:
+        from naukri_agent.browser.apply_type import question_panel_open
+
+        return question_panel_open(self._page)
+
     def detect_apply_type(self) -> str:
         from naukri_agent.browser.apply_workflow import detect_apply_type
 
