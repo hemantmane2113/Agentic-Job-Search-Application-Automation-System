@@ -215,6 +215,11 @@ def test_smtp_sender_raises_email_send_error_on_failure_without_leaking_details(
         assert "SMTPAuthenticationError" in str(exc)
 
 
+def _sheet_contents(path) -> dict[str, list[tuple]]:
+    wb = load_workbook(path)
+    return {ws.title: list(ws.iter_rows(values_only=True)) for ws in wb.worksheets}
+
+
 def test_excel_is_regenerated_entirely_from_db(tmp_path):
     cfg = settings(tmp_path)
     path = tmp_path / "wb.xlsx"
@@ -234,12 +239,15 @@ def test_excel_is_regenerated_entirely_from_db(tmp_path):
             applied_at=datetime.datetime(2026, 8, 20, tzinfo=UTC), note="applied via portal",
         )
         res1 = export_workbook(s, path, cfg)
-        blob1 = path.read_bytes()
+        content1 = _sheet_contents(path)
         res2 = export_workbook(s, path, cfg)
-        blob2 = path.read_bytes()
+        content2 = _sheet_contents(path)
 
     assert res1.jobs_rows == 2 and res1.applications_rows == 1 and res1.daily_runs_rows == 1
-    assert blob1 == blob2  # idempotent for unchanged DB
+    # Idempotent for an unchanged DB. Compare cell contents, not file bytes: an xlsx embeds a
+    # creation timestamp with 1-second resolution, so a byte comparison fails whenever the two
+    # exports straddle a second boundary.
+    assert content1 == content2
 
     wb = load_workbook(path)
     assert wb.sheetnames == ["Jobs", "Applications", "Daily Runs"]
