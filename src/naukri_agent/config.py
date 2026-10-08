@@ -182,6 +182,9 @@ class Settings(BaseSettings):
     naukri_headless: bool = False
     browser_profile_dir: Path = Path("./data/browser_profile")
     inspection_output_dir: Path = Path("./inspection_output")
+    # LinkedIn (L1+): its OWN persistent profile, never shared with Naukri's, so a
+    # LinkedIn checkpoint or session problem cannot touch the Naukri session.
+    linkedin_profile_dir: Path = Path("./data/linkedin_profile")
 
     # --- Email notifications (Phase 10) ---
     smtp_host: str = ""

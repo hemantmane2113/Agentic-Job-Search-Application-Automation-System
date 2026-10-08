@@ -219,6 +219,26 @@ def inspect_naukri(query: str) -> None:
         sys.exit(1)
 
 
+@cli.command("linkedin-inspect")
+@click.option("--query", default="data scientist", show_default=True, help="Job search keywords.")
+@click.option("--location", default="India", show_default=True, help="Job search location.")
+def linkedin_inspect(query: str, location: str) -> None:
+    """
+    LinkedIn L1: READ-ONLY inspection. Opens LinkedIn in its own browser profile,
+    waits for YOU to log in (credentials are never typed by the tool), then loads
+    one search page and one job page and saves their HTML + a JSON report to the
+    inspection output dir. Nothing is clicked, filled or submitted; any LinkedIn
+    checkpoint/CAPTCHA is left for you to complete. Run in an interactive terminal.
+    """
+    settings = get_settings()
+    from naukri_agent.browser.linkedin_inspection import run_linkedin_inspection
+
+    report = run_linkedin_inspection(settings, query=query, location=location)
+    click.echo(json.dumps(report, indent=2))
+    if not report.get("completed"):
+        sys.exit(1)
+
+
 _STAGE_1_5_TEST_JOB_URL = (
     "https://www.naukri.com/job-listings-gen-ai-data-scientist-sigma-allied-services-"
     "pune-gurugram-bengaluru-2-to-7-years-040926008523"
