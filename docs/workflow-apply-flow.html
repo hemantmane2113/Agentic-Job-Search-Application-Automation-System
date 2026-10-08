@@ -5052,15 +5052,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <path data-edge-from="yes" data-edge-to="skip" data-edge-label="No or silence" data-edge-key="9" data-edge-id="yes-skip" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="416,217;416,145" d="M 416 217 L 416 145" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
 
         <!-- Nodes -->
-        <g id="node-pick" data-node-id="pick" data-node-label="Pick jobs" tabindex="0" role="button" aria-label="Focus Pick jobs, ACCEPT, max 3 a day, telegram-apply (plain code) › Choose and ask" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ACCEPT, max 3 a day" data-node-context="telegram-apply (plain code) › Choose and ask">
-          <title>Pick jobs · ACCEPT, max 3 a day · telegram-apply (plain code) › Choose and ask</title>
+        <g id="node-pick" data-node-id="pick" data-node-label="Pick jobs" tabindex="0" role="button" aria-label="Focus Pick jobs, ACCEPT, max 4 a day, telegram-apply (plain code) › Choose and ask" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ACCEPT, max 4 a day" data-node-context="telegram-apply (plain code) › Choose and ask">
+          <title>Pick jobs · ACCEPT, max 4 a day · telegram-apply (plain code) › Choose and ask</title>
           <rect x="48" y="93" width="150" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="93" width="150" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="123" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Pick jobs</text>
-          <text data-detail="context" x="123" y="131" class="t-muted" font-size="8" text-anchor="middle">ACCEPT, max 3 a day</text>
+          <text data-detail="context" x="123" y="131" class="t-muted" font-size="8" text-anchor="middle">ACCEPT, max 4 a day</text>
         </g>
 
         <g id="node-skip" data-node-id="skip" data-node-label="Skipped" tabindex="0" role="button" aria-label="Focus Skipped, profile untouched, telegram-apply (plain code) › You decide" aria-pressed="false" data-node-kind="security" data-node-sublabel="profile untouched" data-node-context="telegram-apply (plain code) › You decide">
@@ -5150,15 +5150,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="564" y="379" class="t-muted" font-size="8" text-anchor="middle">upload only if different</text>
         </g>
 
-        <g id="node-apply" data-node-id="apply" data-node-label="Click Apply" tabindex="0" role="button" aria-label="Focus Click Apply, read the questions, Naukri website › Apply on Naukri" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="read the questions" data-node-context="Naukri website › Apply on Naukri">
-          <title>Click Apply · read the questions · Naukri website › Apply on Naukri</title>
+        <g id="node-apply" data-node-id="apply" data-node-label="Click Apply" tabindex="0" role="button" aria-label="Focus Click Apply, after a short pause, Naukri website › Apply on Naukri" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="after a short pause" data-node-context="Naukri website › Apply on Naukri">
+          <title>Click Apply · after a short pause · Naukri website › Apply on Naukri</title>
           <rect x="672" y="341" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="672" y="341" width="140" height="52" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(678 347) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="742" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Click Apply</text>
-          <text data-detail="context" x="742" y="379" class="t-muted" font-size="8" text-anchor="middle">read the questions</text>
+          <text data-detail="context" x="742" y="379" class="t-muted" font-size="8" text-anchor="middle">after a short pause</text>
         </g>
 
         <g id="node-confirm" data-node-id="confirm" data-node-label="Confirm Applied" tabindex="0" role="button" aria-label="Focus Confirm Applied, reload and check, Naukri website › Apply on Naukri" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="reload and check" data-node-context="Naukri website › Apply on Naukri">
@@ -5418,7 +5418,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>AUTO_APPLY must be on and DRY_RUN off, for this command only</li>
-          <li>No pause file; at most 3 applications per rolling 24 hours</li>
+          <li>No pause file; at most 4 applications per rolling 24 hours</li>
           <li>Only ACCEPT-level jobs with a Naukri Apply button, seen in the last 7 days</li>
         </ul>
       </div>
@@ -5431,7 +5431,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <ul>
           <li>No application without your Yes tap on that job</li>
           <li>Never the wrong resume: if it cannot be confirmed, nothing is applied</li>
-          <li>Answers come from your profile or from you; no AI writes them</li>
+          <li>Never a contract or temporary job: Naukri&#39;s own job type is checked on the page again before applying</li>
         </ul>
       </div>
 
@@ -5442,7 +5442,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>Source, resume and file hash in the application history</li>
-          <li>Each question and the answer that was sent</li>
+          <li>Each question and the answer that was sent; answers come from your profile or from you, no AI writes them</li>
           <li>An Applied message on Telegram naming the resume</li>
         </ul>
       </div>
