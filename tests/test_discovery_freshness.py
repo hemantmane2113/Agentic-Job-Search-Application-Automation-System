@@ -110,7 +110,8 @@ class _FakeClient:
 
 def _cfg(tmp_path, **over):
     base = dict(discovery_queries=["Data Scientist"], discovery_freshness_days=7,
-               discovery_fresh_job_limit=60, discovery_max_total_jobs=200)
+               discovery_fresh_job_limit=60, discovery_max_total_jobs=200,
+               resume_registry_path=tmp_path / "no_registry.yaml")  # hermetic: no personal grouping
     base.update(over)
     return _settings(tmp_path, **base)
 

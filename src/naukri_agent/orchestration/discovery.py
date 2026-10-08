@@ -21,6 +21,7 @@ from naukri_agent.config import Settings
 from naukri_agent.database.models import RunEventStatus
 from naukri_agent.database.repositories import add_run_event, replace_raw_skill_evidence, upsert_job
 from naukri_agent.jobs.models import JobCreate
+from naukri_agent.resume.registry import load_resume_registry
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,70 @@ def _parse_card_age_days(text: str | None) -> int | None:
     return n * 365  # unit == "year"
 
 
+def _role_groups_from_registry(settings: Settings) -> dict[str, str]:
+    """
+    search role (lower-case) -> id of the resume whose `roles` list contains it, from the user's
+    resume registry. Searches that lead to the same resume form ONE group, so the daily slots are
+    shared per resume (Data Scientist vs the AI/ML-type searches), not per search phrase. A role
+    that no resume lists simply keeps its own group. No registry -> no grouping.
+    """
+    try:
+        registry = load_resume_registry(settings.resume_registry_path)
+    except Exception as exc:  # noqa: BLE001 - missing/invalid registry only means "no grouping"
+        logger.debug("no role grouping: %s", type(exc).__name__)
+        return {}
+    groups: dict[str, str] = {}
+    for entry in registry.resumes:
+        for role in entry.roles:
+            groups.setdefault(role.strip().lower(), entry.id)
+    return groups
+
+
+def _round_robin(lanes: list[list]) -> list:
+    """Take one item from each lane in turn (lane order fixed), until all are used up."""
+    out: list = []
+    depth = max((len(lane) for lane in lanes), default=0)
+    for i in range(depth):
+        for lane in lanes:
+            if i < len(lane):
+                out.append(lane[i])
+    return out
+
+
+def _fair_card_order(lanes_by_role: dict[str, list[list[str]]]) -> list[tuple[str, str]]:
+    """
+    (role, url) for every distinct card, in an order that gives each ROLE an equal turn.
+    Without this, cards were simply concatenated in search order (all Data Scientist searches,
+    then ML Engineer, ...), so any cut-off kept the first roles and dropped the last ones
+    (a Data Analyst job never got through). Within a role its searches (cities) also take turns.
+    A card found by several roles belongs to the first that reaches it.
+    """
+    per_role = {
+        role: _round_robin([[(role, url) for url in urls] for urls in queries])
+        for role, queries in lanes_by_role.items()
+    }
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for role, url in _round_robin(list(per_role.values())):
+        if url not in seen:
+            seen.add(url)
+            out.append((role, url))
+    return out
+
+
+def _fair_select(aged: list[tuple[str, str, int]], limit: int) -> list[tuple[str, str]]:
+    """
+    Choose up to `limit` (role, url) from (role, url, age_days): within a role the freshest first
+    (stable: ties keep their order), and the roles take turns, so each gets an equal share and
+    a role with fewer fresh jobs leaves its unused slots to the others.
+    """
+    roles: dict[str, list[tuple[str, str, int]]] = {}
+    for item in aged:
+        roles.setdefault(item[0], []).append(item)
+    lanes = [[(r, u) for r, u, _a in sorted(items, key=lambda it: it[2])] for items in roles.values()]
+    return _round_robin(lanes)[:limit]
+
+
 def build_query_matrix(profile: CandidateProfile, settings: Settings) -> list[DiscoveryQuery]:
     if settings.discovery_queries:
         out: list[DiscoveryQuery] = []
@@ -118,13 +183,15 @@ def discover_and_store(
     *,
     run_id: int,
     seq_start: int = 0,
+    role_groups: dict[str, str] | None = None,
 ) -> tuple[DiscoveryResult, int]:
-    """Returns (result, next_seq)."""
+    """Returns (result, next_seq). role_groups: search role -> group (default: from the resume registry)."""
     seq = seq_start
     matrix = build_query_matrix(profile, settings)
+    groups = role_groups if role_groups is not None else _role_groups_from_registry(settings)
     queries_run = 0
     queries_failed = 0
-    seen_urls: list[str] = []
+    lanes_by_role: dict[str, list[list[str]]] = {}
     # url -> raw search-card posted-date label (first sighting wins, so
     # this mirrors the URL-dedup "first occurrence wins" rule below).
     posted_by_url: dict[str, str | None] = {}
@@ -146,8 +213,8 @@ def discover_and_store(
             )
             continue
         picked = [s for s in summaries if s.url][: settings.discovery_max_jobs_per_query]
+        lanes_by_role.setdefault(groups.get(q.role.strip().lower(), q.role), []).append([s.url for s in picked])
         for s in picked:
-            seen_urls.append(s.url)
             posted_by_url.setdefault(s.url, s.posted_text)
         seq += 1
         add_run_event(
@@ -159,16 +226,11 @@ def discover_and_store(
             detail={"query": f"{q.role} @ {q.location}", "results": len(picked)},
         )
 
-    # de-dup (first occurrence wins -> preserves Naukri's query ordering),
-    # then apply the hard discovery ceiling.
-    ordered_unique: list[str] = []
-    seen: set[str] = set()
-    for u in seen_urls:
-        if u not in seen:
-            seen.add(u)
-            ordered_unique.append(u)
-    discovered_card_count = len(ordered_unique)
-    ordered_unique = ordered_unique[: settings.discovery_max_total_jobs]
+    # de-dup, in an order where every GROUP (= resume) takes equal turns (so neither the ceiling nor the daily
+    # cap below can drop the last roles in the list), then apply the hard discovery ceiling.
+    fair_cards = _fair_card_order(lanes_by_role)
+    discovered_card_count = len(fair_cards)
+    considered = fair_cards[: settings.discovery_max_total_jobs]
 
     # --- Phase F1: freshness-first gate (deterministic; no LLM) --------
     # Keep only cards whose posted-date label parses to <= the freshness
@@ -176,10 +238,10 @@ def discover_and_store(
     # Naukri's query order), and cap the survivors. Absent/unparseable
     # labels are EXCLUDED, never assumed fresh, and counted here.
     window_days = settings.discovery_freshness_days
-    aged: list[tuple[str, int]] = []
+    aged: list[tuple[str, str, int]] = []
     unknown_freshness = 0
     stale_excluded = 0
-    for u in ordered_unique:
+    for role, u in considered:
         age = _parse_card_age_days(posted_by_url.get(u))
         if age is None:
             unknown_freshness += 1
@@ -187,9 +249,9 @@ def discover_and_store(
         if age > window_days:
             stale_excluded += 1
             continue
-        aged.append((u, age))
-    fresh_sorted = [u for u, _age in sorted(aged, key=lambda pair: pair[1])]
-    fresh_capped = fresh_sorted[: settings.discovery_fresh_job_limit]
+        aged.append((role, u, age))
+    chosen = _fair_select(aged, settings.discovery_fresh_job_limit)
+    fresh_capped = [u for _role, u in chosen]
 
     seq += 1
     add_run_event(
@@ -207,6 +269,23 @@ def discover_and_store(
             "fresh_cap": settings.discovery_fresh_job_limit,
             "selected": len(fresh_capped),
         },
+    )
+
+    per_role: dict[str, dict[str, int]] = {}
+    for role, _u in fair_cards:
+        per_role.setdefault(role, {"cards": 0, "within_window": 0, "selected": 0})["cards"] += 1
+    for role, _u, _age in aged:
+        per_role[role]["within_window"] += 1
+    for role, _u in chosen:
+        per_role[role]["selected"] += 1
+    seq += 1
+    add_run_event(
+        session,
+        daily_run_id=run_id,
+        seq=seq,
+        stage="discover_roles",
+        status=RunEventStatus.OK,
+        detail={"groups": per_role},
     )
 
     ordered_unique = fresh_capped
