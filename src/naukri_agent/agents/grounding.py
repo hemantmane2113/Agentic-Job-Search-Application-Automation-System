@@ -1,6 +1,6 @@
 """
 Shared anti-fabrication grounding facts for agentic drafting modules
-(apply_answer_agent.py, cold_email_agent.py).
+(apply_answer_agent.py).
 
 Factored out so the whitelist of permitted CandidateProfile/MasterResume
 facts can never silently drift between the two agents -- both must draw

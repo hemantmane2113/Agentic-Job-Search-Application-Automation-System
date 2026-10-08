@@ -298,25 +298,6 @@ PROFILE_EDIT_SAVE_BUTTON_HINTS = ("save", "update")  # UNVERIFIED
 AUTHENTICATED_NAV_INDICATOR = "img.nI-gNb-icon-img[alt='naukri user profile image']"
 
 
-# =====================================================================
-# LinkedIn (L1 read-only inspection). EVERYTHING below is UNVERIFIED:
-# generic probes meant to discover the real DOM from a captured run of
-# `naukri-agent linkedin-inspect`, not selectors known to work.
-# =====================================================================
-LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/"
-LINKEDIN_JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search/"
-LINKEDIN_JOB_VIEW_URL = "https://www.linkedin.com/jobs/view/{job_id}/"
-
-# A URL containing any of these means LinkedIn wants a human (login wall, security
-# checkpoint, CAPTCHA). The tool pauses for the person; it never tries to get past one.
-LINKEDIN_LOGIN_WALL_URL_FRAGMENTS = ("/login", "/authwall", "/uas/")
-LINKEDIN_CHALLENGE_URL_FRAGMENTS = ("/checkpoint", "/challenge", "captcha")
-
-LINKEDIN_JOB_LINK = "a[href*='/jobs/view/']"  # UNVERIFIED
-LINKEDIN_JOB_TITLE = "h1"  # UNVERIFIED
-LINKEDIN_APPLY_CONTROL_CANDIDATES = "button, a, [role='button']"  # UNVERIFIED; filtered by text in the probe
-
-
 # --- Company page (read by the company-site job researcher; read-only) ---
 # VERIFIED 2026-10-08 against 4 real company-site job pages: each carries a link to the company's
 # Naukri page whose address contains "-jobs-careers-". The company-site Apply button itself is a plain

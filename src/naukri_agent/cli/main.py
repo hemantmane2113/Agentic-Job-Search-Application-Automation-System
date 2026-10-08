@@ -307,26 +307,6 @@ def profile_refresh(execute: bool) -> None:
         sys.exit(1)
 
 
-@cli.command("linkedin-inspect")
-@click.option("--query", default="data scientist", show_default=True, help="Job search keywords.")
-@click.option("--location", default="India", show_default=True, help="Job search location.")
-def linkedin_inspect(query: str, location: str) -> None:
-    """
-    LinkedIn L1: READ-ONLY inspection. Opens LinkedIn in its own browser profile,
-    waits for YOU to log in (credentials are never typed by the tool), then loads
-    one search page and one job page and saves their HTML + a JSON report to the
-    inspection output dir. Nothing is clicked, filled or submitted; any LinkedIn
-    checkpoint/CAPTCHA is left for you to complete. Run in an interactive terminal.
-    """
-    settings = get_settings()
-    from naukri_agent.browser.linkedin_inspection import run_linkedin_inspection
-
-    report = run_linkedin_inspection(settings, query=query, location=location)
-    click.echo(json.dumps(report, indent=2))
-    if not report.get("completed"):
-        sys.exit(1)
-
-
 _STAGE_1_5_TEST_JOB_URL = (
     "https://www.naukri.com/job-listings-gen-ai-data-scientist-sigma-allied-services-"
     "pune-gurugram-bengaluru-2-to-7-years-040926008523"
@@ -549,34 +529,6 @@ def telegram_apply(max_jobs: int | None) -> None:
     if result.blocked_reason:
         sys.exit(2)
     if any(o.outcome in ("failed", "unconfirmed") for o in result.outcomes):
-        sys.exit(1)
-
-
-@cli.command("email-outreach")
-@click.argument("job")
-def email_outreach(job: str) -> None:
-    """
-    Phase 15: draft and, with your approval, send an email for JOB
-    (id / external id / URL) -- an application-by-email if its JD
-    explicitly asked for one, or a cold-outreach note (NOT an
-    application) if it merely mentions a contact email. The mode is
-    resolved automatically from the job's own extraction, never chosen
-    here. Gated by BOTH AUTO_EMAIL_OUTREACH=true AND DRY_RUN=false —
-    neither alone is enough — on top of this command's own interactive
-    review and final y/n confirm. Always interactive; never reachable
-    from run-daily/discover/scheduler.
-    """
-    settings = get_settings()
-    if not (settings.auto_email_outreach and not settings.dry_run):
-        raise click.ClickException(
-            "`email-outreach` is disabled. Set AUTO_EMAIL_OUTREACH=true and DRY_RUN=false "
-            "to enable it (both are required, on top of this command's own human approval)."
-        )
-    from naukri_agent.orchestration.email_outreach_runner import run_email_outreach_workflow
-
-    result = run_email_outreach_workflow(settings, job)
-    click.echo(json.dumps(result.model_dump(), indent=2, default=str))
-    if not result.sent:
         sys.exit(1)
 
 

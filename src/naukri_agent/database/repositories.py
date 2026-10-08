@@ -20,9 +20,6 @@ from naukri_agent.database.models import (
     ApplicationQuestion,
     ApplicationStatus,
     Candidate,
-    EmailOutreachAttempt,
-    EmailOutreachMode,
-    EmailOutreachStatus,
     Job,
     JobExtraction,
     JobExtractionSkillEvidence,
@@ -262,8 +259,6 @@ def add_job_extraction(
         salary_currency=extraction.salary_currency,
         education_requirements=extraction.education_requirements,
         job_type=extraction.job_type,
-        contact_email=extraction.contact_email,
-        email_application_signal=extraction.email_application_signal,
         raw_llm_response=extraction.raw_llm_response,
         source_content_fingerprint=source_content_fingerprint,
     )
@@ -780,107 +775,6 @@ def link_application_questions_to_history(
     )
     session.flush()
     return result
-
-
-# ---------------------------------------------------------------------------
-# Phase 15: cold-email / apply-by-email agent audit log. Purely additive;
-# never consulted by scoring/matching/recommendation logic. Mode decides
-# whether a row's eventual SENT status also touches ApplicationHistory
-# (APPLICATION) or not (COLD_OUTREACH) -- enforced by the caller
-# (orchestration/email_outreach_runner.py), not here.
-# ---------------------------------------------------------------------------
-
-
-def add_email_outreach_attempt(
-    session: Session,
-    *,
-    job_id: int,
-    attempt_id: str,
-    mode: EmailOutreachMode,
-    recipient_email: str,
-    drafted_subject: str,
-    drafted_body: str,
-    resume_id: str | None = None,
-    resume_file_path: str | None = None,
-    llm_provider: str | None = None,
-    llm_model: str | None = None,
-) -> EmailOutreachAttempt:
-    """
-    Record one drafted email-outreach attempt immediately, status=DRAFTED
-    -- before the human review pause -- so a declined/failed send still
-    leaves a durable record of what was drafted and shown to the human.
-    job_id should be the CANONICAL job id. Call
-    finalize_email_outreach_attempt() afterward to move this same row to
-    SENT or ABORTED; never insert a second row for the same attempt.
-    """
-    row = EmailOutreachAttempt(
-        job_id=job_id,
-        attempt_id=attempt_id,
-        mode=mode,
-        status=EmailOutreachStatus.DRAFTED,
-        recipient_email=recipient_email,
-        drafted_subject=drafted_subject,
-        drafted_body=drafted_body,
-        resume_id=resume_id,
-        resume_file_path=resume_file_path,
-        llm_provider=llm_provider,
-        llm_model=llm_model,
-    )
-    session.add(row)
-    session.flush()
-    return row
-
-
-def finalize_email_outreach_attempt(
-    session: Session,
-    attempt: EmailOutreachAttempt,
-    *,
-    status: EmailOutreachStatus,
-    final_subject: str | None = None,
-    final_body: str | None = None,
-    human_edited: bool = False,
-    application_id: int | None = None,
-    aborted_reason: str | None = None,
-) -> EmailOutreachAttempt:
-    """
-    Update the SAME DRAFTED row to its final SENT/ABORTED status --
-    never a new row. `application_id` is set only for a confirmed
-    APPLICATION-mode send, after upsert_application_history() has run.
-    """
-    attempt.status = status
-    attempt.final_subject = final_subject
-    attempt.final_body = final_body
-    attempt.human_edited = human_edited
-    attempt.aborted_reason = aborted_reason
-    if application_id is not None:
-        attempt.application_id = application_id
-    if status == EmailOutreachStatus.SENT:
-        attempt.sent_at = datetime.datetime.now(datetime.UTC)
-    session.flush()
-    return attempt
-
-
-def count_emails_sent_today(session: Session, now: "datetime.datetime | None" = None) -> int:
-    """
-    Count EmailOutreachAttempt rows with status=SENT whose sent_at falls
-    in the current UTC calendar day: [00:00:00 UTC today, 00:00:00 UTC
-    tomorrow). A simple, unambiguous reset point independent of the
-    user's timezone/DAILY_RUN_TIME.
-    """
-    reference = now or datetime.datetime.now(datetime.UTC)
-    day_start = datetime.datetime(
-        reference.year, reference.month, reference.day, tzinfo=datetime.UTC
-    )
-    day_end = day_start + datetime.timedelta(days=1)
-    return (
-        session.query(EmailOutreachAttempt)
-        .filter(
-            EmailOutreachAttempt.status == EmailOutreachStatus.SENT,
-            EmailOutreachAttempt.sent_at >= day_start,
-            EmailOutreachAttempt.sent_at < day_end,
-        )
-        .count()
-    )
 
 
 def list_application_questions(

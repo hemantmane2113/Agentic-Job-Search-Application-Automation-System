@@ -38,23 +38,6 @@ class JobType(str, enum.Enum):
     UNKNOWN = "unknown"
 
 
-class EmailApplicationSignal(str, enum.Enum):
-    """
-    Closed, EXPLICIT-STATEMENT-ONLY classification of what a JD
-    literally says about a contact email — never an inferred judgment
-    about whether to email this company. Mirrors JobType's own
-    discipline (job_type is never inferred from title/seniority/
-    work-mode; this is never inferred from "this looks like a small
-    company" or similar). Phase 15 (agents/cold_email_agent.py,
-    orchestration/email_outreach_runner.py) is the ONLY thing allowed
-    to decide what to DO with this signal — extraction never decides.
-    """
-
-    NONE = "none"  # no email address appears in the JD text at all
-    CONTACT_ONLY = "contact_only"  # an email appears, but only as general contact/query info
-    APPLY_VIA_EMAIL = "apply_via_email"  # the JD explicitly instructs emailing a resume/application
-
-
 class JobCreate(BaseModel):
     """RAW job data, as scraped, before any LLM processing."""
 
@@ -92,15 +75,6 @@ class JobExtractionCreate(BaseModel):
     education_requirements: list[str] = Field(default_factory=list)
     job_type: JobType = JobType.UNKNOWN
 
-    # Phase 15: a contact email literally present in the JD text, and
-    # what the text explicitly says about it. Pure extraction — never a
-    # decision about whether/how to use it (see jobs/parser.py's
-    # _normalize_contact_email_in_payload for the deterministic
-    # Python-side guard, and orchestration/email_outreach_runner.py for
-    # what acts on it).
-    contact_email: str | None = None
-    email_application_signal: EmailApplicationSignal = EmailApplicationSignal.NONE
-
     # The LLM's actual output, verbatim, before it was parsed into the
     # typed fields above — this is what makes the extraction step
     # auditable rather than a black box.
@@ -130,8 +104,6 @@ class LLMJobExtractionPayload(BaseModel):
     salary_currency: str | None = None
     education_requirements: list[str] = Field(default_factory=list)
     job_type: JobType = JobType.UNKNOWN
-    contact_email: str | None = None
-    email_application_signal: EmailApplicationSignal = EmailApplicationSignal.NONE
 
 
 def extract_external_id(url: str) -> str | None:

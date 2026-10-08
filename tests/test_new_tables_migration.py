@@ -17,15 +17,12 @@ from naukri_agent.database.models import (
     ApplicationHistory,
     ApplicationStatus,
     Base,
-    EmailOutreachAttempt,
-    EmailOutreachMode,
     JobExtractionSkillEvidence,
     JobRawSkillEvidence,
     JobRecommendation,
     RunEvent,
 )
 from naukri_agent.database.repositories import (
-    add_email_outreach_attempt,
     application_status_for_job,
     replace_raw_skill_evidence,
     upsert_application_history,
@@ -40,7 +37,6 @@ _NEW_TABLES = {
     "run_events",
     "job_raw_skill_evidence",
     "job_extraction_skill_evidence",
-    "email_outreach_attempts",
 }
 
 
@@ -93,14 +89,6 @@ def test_init_db_adds_new_tables_and_keeps_existing_rows(tmp_path):
         assert s.query(RunEvent).count() == 0
         assert s.query(JobRawSkillEvidence).count() == 0
         assert s.query(JobExtractionSkillEvidence).count() == 0
-        assert s.query(EmailOutreachAttempt).count() == 0
-
-        # the new email-outreach-attempts table is usable against the legacy job row
-        attempt = add_email_outreach_attempt(
-            s, job_id=legacy_job_id, attempt_id="att-legacy", mode=EmailOutreachMode.COLD_OUTREACH,
-            recipient_email="hr@oldco.com", drafted_subject="s", drafted_body="b",
-        )
-        assert attempt.job_id == legacy_job_id
 
         assert application_status_for_job(s, legacy_job_id) == ApplicationStatus.NOT_APPLIED
         row, created = upsert_application_history(
@@ -137,8 +125,7 @@ def test_init_db_is_idempotent_on_a_fully_migrated_db(tmp_path):
 
 def test_init_db_adds_nullable_columns_that_a_later_release_put_on_an_existing_table(tmp_path):
     """create_all() never adds columns to an existing table, so a DB from
-    before job_extractions gained contact_email/email_application_signal/
-    source_content_fingerprint failed every JobExtraction query with 'no
+    before job_extractions gained source_content_fingerprint failed every JobExtraction query with 'no
     such column' (found just before a scheduled run). init_db() now adds
     missing NULLABLE columns itself, keeps existing rows, and is idempotent."""
     import sqlite3
@@ -156,7 +143,7 @@ def test_init_db_adds_nullable_columns_that_a_later_release_put_on_an_existing_t
         ))
         s.add(JobExtraction(job_id=job.id, extraction_version=1, is_current=True))
 
-    new_cols = ["contact_email", "email_application_signal", "source_content_fingerprint"]
+    new_cols = ["source_content_fingerprint"]
     raw = sqlite3.connect(db_file)
     for col in new_cols:
         raw.execute(f"ALTER TABLE job_extractions DROP COLUMN {col}")

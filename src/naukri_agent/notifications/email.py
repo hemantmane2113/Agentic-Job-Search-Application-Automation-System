@@ -23,16 +23,13 @@ from __future__ import annotations
 
 import datetime
 import logging
-import mimetypes
 import smtplib
 from abc import ABC, abstractmethod
-from email import encoders
-from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from naukri_agent.config import Settings
 from naukri_agent.notifications.exceptions import EmailConfigError, EmailSendError
@@ -45,10 +42,6 @@ class EmailMessage(BaseModel):
     subject: str
     text_body: str
     html_body: str | None = None
-    # Phase 15: absolute file paths to attach (e.g. a resume for an
-    # email-based application/cold outreach). Default [] means every
-    # existing caller (the digest email) is completely unaffected.
-    attachments: list[str] = Field(default_factory=list)
 
 
 class SendResult(BaseModel):
@@ -79,9 +72,6 @@ class FileEmailSender(EmailSender):
             header = f"Subject: {message.subject}\n"
             if message.to:
                 header += f"To: {message.to}\n"
-            if message.attachments:
-                names = ", ".join(Path(p).name for p in message.attachments)
-                header += f"Attachments: {names}\n"
             path.write_text(header + "\n" + message.text_body, encoding="utf-8")
             if message.html_body:
                 path.with_suffix(".html").write_text(message.html_body, encoding="utf-8")
@@ -98,9 +88,6 @@ class ConsoleEmailSender(EmailSender):
         try:
             print(f"Subject: {message.subject}\n")
             print(message.text_body)
-            if message.attachments:
-                names = ", ".join(Path(p).name for p in message.attachments)
-                print(f"Attachments: {names}")
             return SendResult(sender="console", status="printed")
         except Exception as exc:  # noqa: BLE001
             raise EmailSendError(f"ConsoleEmailSender failed: {type(exc).__name__}") from exc
@@ -130,38 +117,14 @@ class SmtpEmailSender(EmailSender):
             raise EmailSendError("SmtpEmailSender: no recipient address configured")
 
         try:
-            # multipart/mixed (outer) carrying a nested multipart/alternative
-            # (text+html, unchanged) plus one part per attachment -- the
-            # standard MIME shape for "body + files". Building this --
-            # including reading attachment files, which can legitimately
-            # raise FileNotFoundError/PermissionError -- happens INSIDE this
-            # try block so the module's "never log str(exc)" rule (an
-            # attachment I/O error can echo a local filesystem path) covers
-            # it exactly like every SMTP failure already is.
-            outer = MIMEMultipart("mixed")
+            # Built inside the try block so the module's "never log str(exc)" rule covers it too.
+            outer = MIMEMultipart("alternative")
             outer["Subject"] = message.subject
             outer["From"] = self.username
             outer["To"] = to_addr
-
-            alt = MIMEMultipart("alternative")
-            alt.attach(MIMEText(message.text_body, "plain", "utf-8"))
+            outer.attach(MIMEText(message.text_body, "plain", "utf-8"))
             if message.html_body:
-                alt.attach(MIMEText(message.html_body, "html", "utf-8"))
-            outer.attach(alt)
-
-            for path_str in message.attachments:
-                path = Path(path_str)
-                ctype, encoding = mimetypes.guess_type(str(path))
-                if ctype and not encoding:
-                    maintype, subtype = ctype.split("/", 1)
-                else:
-                    maintype, subtype = "application", "octet-stream"
-                with path.open("rb") as f:
-                    part = MIMEBase(maintype, subtype)
-                    part.set_payload(f.read())
-                encoders.encode_base64(part)
-                part.add_header("Content-Disposition", "attachment", filename=path.name)
-                outer.attach(part)
+                outer.attach(MIMEText(message.html_body, "html", "utf-8"))
 
             with smtplib.SMTP(self.host, self.port, timeout=30) as server:
                 server.starttls()
@@ -170,7 +133,7 @@ class SmtpEmailSender(EmailSender):
         except Exception as exc:  # noqa: BLE001 -- never log str(exc), see module docstring
             raise EmailSendError(f"SmtpEmailSender failed: {type(exc).__name__}") from exc
 
-        logger.info("email sent via SMTP to %s (%d attachment(s))", to_addr, len(message.attachments))
+        logger.info("email sent via SMTP to %s", to_addr)
         return SendResult(sender="smtp", status="sent", path=None)
 
 

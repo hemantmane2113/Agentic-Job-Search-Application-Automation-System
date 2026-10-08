@@ -35,7 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from naukri_agent.database.base import Base
-from naukri_agent.jobs.models import EmailApplicationSignal, JobType
+from naukri_agent.jobs.models import JobType
 from naukri_agent.matching.models import MatchDecision
 from naukri_agent.resume.registry import ResumeMatchVia, ResumeSelectionDecision
 
@@ -201,15 +201,6 @@ class JobExtraction(Base):
     salary_currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
     education_requirements: Mapped[list | None] = mapped_column(JSON, nullable=True)
     job_type: Mapped[JobType | None] = mapped_column(Enum(JobType), nullable=True)
-
-    # Phase 15: a contact email literally present in the JD text, and
-    # what the text explicitly says about it — pure extraction, never a
-    # decision. See jobs/parser.py's _normalize_contact_email_in_payload
-    # and orchestration/email_outreach_runner.py for what acts on it.
-    contact_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    email_application_signal: Mapped[EmailApplicationSignal | None] = mapped_column(
-        Enum(EmailApplicationSignal), nullable=True
-    )
 
     # The LLM's actual output, verbatim, before parsing into the
     # typed columns above. This is what makes the extraction step
@@ -651,85 +642,6 @@ class RunEvent(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debug convenience
         return f"<RunEvent id={self.id} run={self.daily_run_id} {self.stage}={self.status.value}>"
-
-
-class EmailOutreachMode(str, enum.Enum):
-    APPLICATION = "APPLICATION"  # the JD explicitly asked candidates to email their resume
-    COLD_OUTREACH = "COLD_OUTREACH"  # a contact email was merely mentioned; NOT an application
-
-
-class EmailOutreachStatus(str, enum.Enum):
-    DRAFTED = "DRAFTED"
-    SENT = "SENT"
-    ABORTED = "ABORTED"
-
-
-class EmailOutreachAttempt(Base):
-    """
-    Audit log of one Phase 15 email-outreach attempt — never consulted
-    by scoring/matching/recommendation logic, same framing as
-    ApplicationQuestion/JobRecommendation/RunEvent. `job_id` is the
-    CANONICAL job id, same convention as ApplicationHistory.
-
-    Mode is resolved deterministically (never by the LLM) from the
-    job's own JobExtraction.email_application_signal:
-    APPLY_VIA_EMAIL -> APPLICATION, CONTACT_ONLY -> COLD_OUTREACH.
-    A confirmed APPLICATION-mode send also creates/updates an
-    ApplicationHistory row (source="agent_email_apply") and backfills
-    `application_id` here; COLD_OUTREACH never touches
-    ApplicationHistory, so this project's "recommendation vs.
-    application, never conflated" rule holds even for this new path.
-
-    Same persistence-timing precedent as ApplicationQuestion: a row is
-    inserted as DRAFTED immediately after drafting (before the human
-    review pause), then the SAME row is updated to SENT or ABORTED --
-    never deleted -- so a declined/failed send still leaves a durable
-    audit trail of what was drafted and shown to the human.
-
-    `drafted_subject`/`drafted_body`/`final_subject`/`final_body` hold
-    the full real text: this is a live, human-supervised flow (the
-    human reviews/edits exactly this content before anything sends),
-    not a sanitized background log like apply_inspection.py's.
-    """
-
-    __tablename__ = "email_outreach_attempts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
-    application_id: Mapped[int | None] = mapped_column(
-        ForeignKey("application_history.id"), nullable=True, index=True
-    )
-    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-
-    mode: Mapped[EmailOutreachMode] = mapped_column(Enum(EmailOutreachMode), nullable=False)
-    status: Mapped[EmailOutreachStatus] = mapped_column(
-        Enum(EmailOutreachStatus), default=EmailOutreachStatus.DRAFTED, nullable=False, index=True
-    )
-    recipient_email: Mapped[str] = mapped_column(String(320), nullable=False)
-
-    drafted_subject: Mapped[str] = mapped_column(String(500), nullable=False)
-    drafted_body: Mapped[str] = mapped_column(Text, nullable=False)
-    final_subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    final_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    human_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    resume_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    resume_file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-
-    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
-
-    drafted_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
-    )
-    sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
-    aborted_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
-
-    def __repr__(self) -> str:  # pragma: no cover - debug convenience
-        return (
-            f"<EmailOutreachAttempt id={self.id} job_id={self.job_id} "
-            f"mode={self.mode.value} status={self.status.value}>"
-        )
 
 
 class AutoApplyAttempt(Base):

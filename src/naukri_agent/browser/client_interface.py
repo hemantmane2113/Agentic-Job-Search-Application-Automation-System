@@ -1,8 +1,7 @@
 """
 JobBoardClient: the generic contract a job-board automation facade
 must implement. NaukriClient is today's only implementation; this
-exists so a future second platform (e.g. a read-only LinkedIn/Indeed
-client) can be added behind the same interface without a rewrite of
+exists so a future second platform can be added behind the same interface without a rewrite of
 anything that consumes it — no second platform is implemented yet.
 
 Plain ABC, not typing.Protocol, matching this codebase's only other
