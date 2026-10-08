@@ -69,6 +69,24 @@ class DailyRunResult(BaseModel):
     notes: list[str] = []
 
 
+_RETRYABLE_PARSE_ERRORS = ("llm_error", "invalid_json", "invalid_schema")
+
+
+def _parse_with_retry(provider, job, budget: list[int]):
+    """
+    Parse once; if it failed in a way a second attempt can fix (timeout, malformed or schema-
+    invalid reply) and the run's retry budget allows, parse ONE more time. Returns
+    (result, retried). An oversized description ("jd_too_long") is deterministic, so it is
+    never retried. The budget is a one-item list shared across the whole run.
+    """
+    pr = JobParser(provider).parse(job)
+    if pr.success or budget[0] <= 0 or not (pr.error or "").startswith(_RETRYABLE_PARSE_ERRORS):
+        return pr, False
+    budget[0] -= 1
+    logger.info("retrying parse once for job id=%s (%s)", job.id, (pr.error or "")[:40])
+    return JobParser(provider).parse(job), True
+
+
 def _refresh_note(result) -> str | None:
     """One line for the email, or None when there is nothing worth saying."""
     outcome, rid = result.outcome, result.resume_id
@@ -145,6 +163,7 @@ def run_daily_recommendations(
     explain_provider=None,
     session_factory=None,
     profile_refresh_fn=None,
+    telegram_notify=None,
 ) -> DailyRunResult:
     settings = settings or get_settings()
     now = now or datetime.datetime.now(datetime.UTC)
@@ -211,6 +230,7 @@ def run_daily_recommendations(
         if extraction_provider is None:
             extraction_provider = _build_extraction_provider(settings)
         parse_failures = 0
+        retry_budget = [max(0, settings.parse_retries_per_run)]
         # Job ids whose LLM parse was ATTEMPTED this run and FAILED. These
         # jobs are still scored (score_job(job, None, ...)) and still get a
         # diagnostic JobMatch row, but a raw-listing score can only inflate
@@ -249,8 +269,10 @@ def run_daily_recommendations(
                                   status=RunEventStatus.OK, job_id=job.id,
                                   detail={"reused_cached_extraction": True, "extraction_id": cached.id})
                 else:
-                    pr = JobParser(extraction_provider).parse(job)
+                    pr, retried = _parse_with_retry(extraction_provider, job, retry_budget)
                     norm_detail: dict = {}
+                    if retried:
+                        norm_detail["retried"] = True
                     if pr.normalizations:
                         norm_detail["normalized"] = pr.normalizations
                     if pr.warnings:
@@ -418,6 +440,14 @@ def run_daily_recommendations(
                               status=RunEventStatus.FAILED, detail={"error": type(exc).__name__})
                 notes.append(f"Excel export failed: {type(exc).__name__}")
 
+        # --- phone ping: how many jobs are ready for telegram-apply (never applies anything) ---
+        ping = _ping_apply_ready(session, candidate.id, settings, now, telegram_notify)
+        if ping is not None:
+            seq += 1
+            add_run_event(session, daily_run_id=run_id, seq=seq, stage="telegram_ping",
+                          status=RunEventStatus.OK if ping[0] else RunEventStatus.FAILED,
+                          detail={"jobs": ping[1]})
+
         return DailyRunResult(
             run_id=run_id,
             status=run.status.value,
@@ -430,6 +460,58 @@ def run_daily_recommendations(
             failure_reason=run.failure_reason,
             notes=notes,
         )
+
+
+_PING_LIST_MAX = 5
+
+
+def _apply_ready_text(jobs: list[dict], remaining: int, cap: int) -> str:
+    lines = [f"Naukri: {len(jobs)} job(s) ready to apply via Telegram (ACCEPT, Naukri Apply button).", ""]
+    for i, j in enumerate(jobs[:_PING_LIST_MAX], 1):
+        resume = j.get("resume_id") or "no role match"
+        lines.append(f"{i}. {j['title']} - {j['company']}  (score {j['score']:.0f}, resume {resume})")
+    if len(jobs) > _PING_LIST_MAX:
+        lines.append(f"... and {len(jobs) - _PING_LIST_MAX} more")
+    lines.append("")
+    if remaining > 0:
+        lines.append(f"You can approve up to {remaining} today (limit {cap} per 24h).")
+        lines.append("Start with your usual telegram-apply command; nothing is applied until you tap Yes on each job.")
+    else:
+        lines.append(f"The daily limit ({cap} per 24h) is already used, so these wait for a later day.")
+    return "\n".join(lines)
+
+
+def _ping_apply_ready(session, candidate_id, settings, now, notify):
+    """
+    Tell the phone how many jobs `telegram-apply` could offer right now. Returns None when nothing
+    was sent (feature off, Telegram not set up, or no jobs), else (sent_ok, job_count). Whatever
+    goes wrong here is reduced to (False, n): a failed ping must never fail the daily run.
+    """
+    if not settings.telegram_ping_apply_ready:
+        return None
+    if notify is None and not (settings.telegram_bot_token and settings.telegram_chat_id):
+        return None
+    try:
+        from naukri_agent.database.repositories import auto_apply_count_since
+        from naukri_agent.recommendations.apply_ready import select_candidates
+
+        session.flush()
+        jobs = select_candidates(session, candidate_id, settings, now)
+        if not jobs:
+            return None
+        remaining = max(
+            0, settings.auto_apply_daily_cap - auto_apply_count_since(session, now - datetime.timedelta(hours=24))
+        )
+        text = _apply_ready_text(jobs, remaining, settings.auto_apply_daily_cap)
+        if notify is None:
+            from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
+
+            notify = build_telegram_interaction(settings).notify
+        notify(text)
+        return True, len(jobs)
+    except Exception as exc:  # noqa: BLE001 - the digest is already sent; the ping is a courtesy
+        logger.warning("telegram ping failed: %s", type(exc).__name__)
+        return False, 0
 
 
 def _jr():

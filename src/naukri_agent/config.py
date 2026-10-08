@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # chat id. Only messages from that one chat are ever acted on.
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # After the daily run, tell the phone how many jobs are ready for `telegram-apply` (only when
+    # Telegram is set up and there is at least one). Never applies anything by itself.
+    telegram_ping_apply_ready: bool = True
+    # Parsing a job description with the local LLM sometimes fails for a reason that a second
+    # attempt fixes (a timeout, a malformed reply). Retry once, at most this many times per run
+    # in total, so a bad day cannot add hours. An oversized description is never retried.
+    parse_retries_per_run: int = 6
     telegram_approval_timeout_minutes: int = 20  # waiting for the job's Yes/No
     telegram_answer_timeout_minutes: int = 15  # waiting for each answer / final Yes
 
