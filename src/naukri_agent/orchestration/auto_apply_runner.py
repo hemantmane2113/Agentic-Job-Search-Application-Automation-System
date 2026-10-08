@@ -30,6 +30,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import re
 import uuid
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
@@ -63,6 +64,28 @@ class AutoApplyRunResult(BaseModel):
     email_status: str | None = None
 
 
+_MATCHED_RE = re.compile(r"^(?P<skill>.+?) (?P<kind>required|preferred) skill matched")
+_MISSING_RE = re.compile(r"^(?P<skill>.+?) (?P<kind>required|preferred) but not present$")
+
+
+def split_skill_factors(positives: list[str], negatives: list[str]) -> dict[str, list[str]]:
+    """The scorer's own explanation lines, split into matched / missing skills,
+    required vs preferred. Pure text parsing of what the scorer already wrote;
+    nothing is inferred and no skill is invented."""
+    out: dict[str, list[str]] = {
+        "matched_required": [], "matched_preferred": [], "missing_required": [], "missing_preferred": [],
+    }
+    for text in positives:
+        m = _MATCHED_RE.match(text)
+        if m:
+            out[f"matched_{m.group('kind')}"].append(m.group("skill").strip())
+    for text in negatives:
+        m = _MISSING_RE.match(text)
+        if m:
+            out[f"missing_{m.group('kind')}"].append(m.group("skill").strip())
+    return out
+
+
 def check_gates(settings: Settings, interactive: bool = False) -> str | None:
     """Why auto-apply must not run, or None if every gate is open.
 
@@ -85,7 +108,7 @@ def check_gates(settings: Settings, interactive: bool = False) -> str | None:
 
 def select_candidates(session: Any, candidate_id: int, settings: Settings, now: datetime.datetime) -> list[dict]:
     """Eligible jobs, best score first. Pure DB reads."""
-    from naukri_agent.database.models import Job, JobMatch
+    from naukri_agent.database.models import Job, JobExtraction, JobMatch
     from naukri_agent.database.repositories import application_status_for_job, auto_apply_job_ids_to_skip
     from naukri_agent.matching.models import MatchDecision
 
@@ -114,9 +137,14 @@ def select_candidates(session: Any, candidate_id: int, settings: Settings, now: 
             continue
         if application_status_for_job(session, job.id).name in excluded:
             continue
+        extraction = session.get(JobExtraction, match.job_extraction_id)
         picked.append(
             {"job_id": job.id, "title": job.title, "company": job.company, "url": job.url,
-             "score": match.overall_score}
+             "score": match.overall_score,
+             "experience_text": job.experience_text,
+             "experience_min": extraction.experience_min if extraction else None,
+             "experience_max": extraction.experience_max if extraction else None,
+             **split_skill_factors(list(match.positive_factors or []), list(match.negative_factors or []))}
         )
     return picked
 
@@ -271,6 +299,7 @@ def run_auto_apply(
     try:
         with (open_client or _open_naukri_client)(settings) as client:
             for job in candidates[:max_attempts]:
+                job = {**job, "your_years": candidate.years_experience}
                 if result.applied >= remaining:
                     result.stopped_reason = "daily cap reached"
                     break

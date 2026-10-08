@@ -118,7 +118,13 @@ def seed(cfg_, specs):
             job = add_job(s, slug=slug, ext=ext, title=f"{slug} role", company="Acme")
             job.apply_type = kw.get("apply_type", "native")
             job.last_seen_at = kw.get("last_seen", NOW)
-            score(s, cid, job.id, overall=sc, decision=kw.get("decision", MatchDecision.ACCEPT))
+            score(
+                s, cid, job.id, overall=sc, decision=kw.get("decision", MatchDecision.ACCEPT),
+                positives=kw.get("positives", ("skills match: Python, SQL",)),
+                negatives=kw.get("negatives", ("salary below expectation",)),
+            )
+            if "experience_text" in kw:
+                job.experience_text = kw["experience_text"]
             if kw.get("extraction", True):
                 ex = JobExtraction(job_id=job.id, extraction_version=1, is_current=True)
                 s.add(ex)
@@ -328,3 +334,45 @@ def test_auto_apply_is_unreachable_from_the_daily_pipeline_discovery_and_schedul
 
     for mod in (pipeline, discovery, daemon):
         assert "auto_apply_runner" not in inspect.getsource(mod)
+
+
+def test_candidates_carry_experience_and_matched_and_missing_skills_for_the_phone(tmp_path):
+    from naukri_agent.orchestration.auto_apply_runner import select_candidates, split_skill_factors
+
+    c = cfg(tmp_path)
+    factory, _urls = seed(c, [("card", "040926001601", 90.0, {
+        "experience_text": "3 - 8 years",
+        "positives": ["Python required skill matched (3.1 yrs relevant experience)",
+                      "Machine Learning/AI required skill matched via Machine Learning",
+                      "Deep Learning & NLP required skill matched (all parts present)",
+                      "Docker preferred skill matched", "Experience within required range"],
+        "negatives": ["LangChain required but not present", "Tableau preferred but not present",
+                      "Salary information incomplete"],
+    })])
+    with session_scope(factory) as s:
+        from naukri_agent.database.models import Candidate
+
+        job = select_candidates(s, s.query(Candidate).one().id, c, NOW)[0]
+    assert job["experience_text"] == "3 - 8 years"
+    assert job["matched_required"] == ["Python", "Machine Learning/AI", "Deep Learning & NLP"]
+    assert job["matched_preferred"] == ["Docker"]
+    assert job["missing_required"] == ["LangChain"] and job["missing_preferred"] == ["Tableau"]
+    assert split_skill_factors(["Role title exactly matches 'Data Scientist'"], ["Salary information incomplete"]) == {
+        "matched_required": [], "matched_preferred": [], "missing_required": [], "missing_preferred": [],
+    }
+
+
+def test_the_approval_prompt_receives_the_candidates_years_so_the_phone_can_compare(tmp_path):
+    from .test_auto_apply_interactive import FakeHuman, go
+
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("yrs", "040926001701", 90.0, {})])
+    seen = []
+
+    class Spy(FakeHuman):
+        def approve_job(self, job):
+            seen.append(job.get("your_years"))
+            return False
+
+    go(c, factory, FakeClient({urls["yrs"]: {}}), Spy())
+    assert seen == [CAND.years_experience]

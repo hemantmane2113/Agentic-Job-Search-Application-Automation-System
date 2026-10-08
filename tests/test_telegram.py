@@ -160,6 +160,38 @@ def test_approve_job_message_names_the_job_and_carries_the_link():
     assert "Data Scientist" in body and "Acme" in body and "88.5" in body and JOB["url"] in body
 
 
+def test_job_card_shows_experience_and_matched_and_missing_skills():
+    from naukri_agent.orchestration.telegram_interaction import format_job_card
+
+    card = format_job_card({
+        **JOB, "experience_text": "3 - 8 years", "your_years": 3.0,
+        "matched_required": ["Python", "SQL"], "matched_preferred": ["Docker"],
+        "missing_required": ["LangChain"], "missing_preferred": ["Tableau", "Spark"],
+    })
+    assert "Experience required: 3 - 8 years  (you have 3 yrs)" in card
+    assert "Matched - required (2): Python, SQL" in card
+    assert "Matched - preferred (1): Docker" in card
+    assert "MISSING - required (1): LangChain" in card
+    assert "Missing - preferred (2): Tableau, Spark" in card
+    assert card.rstrip().endswith(JOB["url"])
+
+
+def test_job_card_falls_back_to_the_extracted_range_and_caps_long_skill_lists():
+    from naukri_agent.orchestration.telegram_interaction import format_job_card
+
+    card = format_job_card({**JOB, "experience_text": None, "experience_min": 4.0, "experience_max": None,
+                            "matched_required": [f"S{i}" for i in range(15)]})
+    assert "Experience required: 4 - ? years" in card
+    assert "Matched - required (15): S0, S1" in card and "+3 more" in card and "S14" not in card
+
+
+def test_job_card_says_so_when_there_is_no_skill_breakdown_or_experience():
+    from naukri_agent.orchestration.telegram_interaction import format_job_card
+
+    card = format_job_card(JOB)
+    assert "Experience required: not stated" in card and "no skill breakdown stored" in card
+
+
 def test_question_dot_accepts_the_suggestion_and_own_text_overrides_it():
     w = World([[], [text(".")]])
     assert interaction(w).ask_question(1, 2, "Notice period?", "Immediate") == "Immediate"

@@ -24,6 +24,54 @@ ACCEPT_SUGGESTION = "."
 STOP_WORD = "/stop"
 
 
+_MAX_SKILLS_SHOWN = 12
+
+
+def _years(value: float) -> str:
+    return f"{value:g}"
+
+
+def _skill_line(label: str, items: list[str]) -> str | None:
+    if not items:
+        return None
+    shown = ", ".join(items[:_MAX_SKILLS_SHOWN])
+    more = f" +{len(items) - _MAX_SKILLS_SHOWN} more" if len(items) > _MAX_SKILLS_SHOWN else ""
+    return f"{label} ({len(items)}): {shown}{more}"
+
+
+def format_job_card(job: dict) -> str:
+    """What is sent to the phone before applying: the job, the score, the
+    experience asked for, and which skills matched or are missing."""
+    exp = job.get("experience_text")
+    if not exp:
+        lo, hi = job.get("experience_min"), job.get("experience_max")
+        if lo is not None or hi is not None:
+            exp = f"{_years(lo) if lo is not None else '?'} - {_years(hi) if hi is not None else '?'} years"
+    mine = job.get("your_years")
+    exp_line = f"Experience required: {exp or 'not stated'}" + (f"  (you have {_years(mine)} yrs)" if mine is not None else "")
+
+    lines = [
+        "Apply to this job?",
+        "",
+        job["title"],
+        job["company"],
+        f"Match score: {job['score']:.1f}",
+        exp_line,
+        "",
+    ]
+    skill_lines = [
+        _skill_line("Matched - required", job.get("matched_required", [])),
+        _skill_line("Matched - preferred", job.get("matched_preferred", [])),
+        _skill_line("MISSING - required", job.get("missing_required", [])),
+        _skill_line("Missing - preferred", job.get("missing_preferred", [])),
+    ]
+    lines += [x for x in skill_lines if x]
+    if not any(skill_lines):
+        lines.append("(no skill breakdown stored for this job)")
+    lines += ["", job["url"]]
+    return "\n".join(lines)
+
+
 class TelegramInteraction:
     def __init__(self, channel: TelegramChannel, settings: Settings) -> None:
         self._ch = channel
@@ -31,10 +79,7 @@ class TelegramInteraction:
         self._answer_s = settings.telegram_answer_timeout_minutes * 60
 
     def approve_job(self, job: dict) -> bool | None:
-        return self._ch.ask_yes_no(
-            f"Apply to this job?\n\n{job['title']}\n{job['company']}\nMatch score: {job['score']:.1f}\n{job['url']}",
-            self._approve_s,
-        )
+        return self._ch.ask_yes_no(format_job_card(job), self._approve_s)
 
     def ask_question(self, index: int, total: int, text: str, suggestion: str | None) -> str | None:
         hint = (
