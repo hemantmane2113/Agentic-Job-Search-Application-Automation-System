@@ -371,6 +371,23 @@ last `FOLLOWUP_LOOKBACK_DAYS` (7) that have no record yet, at most `FOLLOWUP_MAX
 
 **Part 3 of the digest** lists these company-website jobs from the last `FOLLOWUP_LOOKBACK_DAYS` days (not today's Part 1) and where each one stands: waiting for your answer (shown first, with its direct link), applied through company website, not applied, or ignored.
 
+## Weekly Excel report
+
+Every Sunday at 22:00 the scheduled task "Naukri Agent - Weekly Report" runs `naukri-agent weekly-report`. It builds one
+Excel file with every job the app gave you during that Monday-to-Sunday week and where each one stands, saves it under
+`WEEKLY_REPORT_DIR` (default `out/weekly/`), and emails it to `NOTIFY_EMAIL_TO` as an attachment (turn the email off with
+`WEEKLY_REPORT_EMAIL=false`).
+
+- **Jobs given:** company-website jobs that were in a digest's Part 1, and Naukri Apply jobs that `telegram-apply` offered or
+  a Telegram ping listed. The ping's job list is recorded from 2026-10-09; earlier pings only count the jobs actually offered.
+- **Sheets:** `Summary` (totals by route and by status) and `Jobs` (one row per job: date given, route, title, company,
+  location, match score, suggested resume, status and its date, direct apply link, Naukri link, notes), coloured by status.
+- **Status** is what the records say as of the moment the report is made. A job marked failed or unconfirmed is flagged:
+  check it on Naukri, because the app could not confirm the result and it may still have gone through.
+- Run it by hand any time: `naukri-agent weekly-report` (on a Sunday: this week; any other day: the week that just ended),
+  `--week-of 2026-10-07` for a chosen week, `--no-email` to only save the file. If the PC is off on Sunday night the task
+  runs when it is next on.
+
 ## Email setup
 
 Digest delivery has three modes, selected by `EMAIL_SENDER`:

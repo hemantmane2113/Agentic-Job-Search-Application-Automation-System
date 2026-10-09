@@ -733,6 +733,37 @@ def applications(status) -> None:
     click.echo(json.dumps(out, indent=2))
 
 
+@cli.command("weekly-report")
+@click.option("--week-of", "week_of", default=None, help="Any date (YYYY-MM-DD) in the Monday-Sunday week you want.")
+@click.option("--no-email", is_flag=True, default=False, help="Only save the Excel file; do not email it.")
+def weekly_report(week_of: str | None, no_email: bool) -> None:
+    """
+    The weekly Excel report: every job given during a Monday-to-Sunday week (company-website jobs from the digests and the
+    Naukri Apply jobs offered or listed on Telegram) with where each one stands. Saved under WEEKLY_REPORT_DIR and emailed
+    to you. Run by a scheduled task every Sunday at 22:00. Reads the database only; applies and changes nothing.
+    """
+    import datetime as _dt
+
+    settings = get_settings()
+    from naukri_agent.notifications.exceptions import EmailSendError
+    from naukri_agent.reporting.weekly import run_weekly_report
+
+    try:
+        wanted = _dt.date.fromisoformat(week_of) if week_of else None
+    except ValueError:
+        raise click.ClickException("--week-of must be a date like 2026-10-09")
+    try:
+        report = _explain_busy_database(
+            lambda: run_weekly_report(settings, week_of=wanted, send_email=False if no_email else None)
+        )
+    except EmailSendError as exc:
+        raise click.ClickException(f"The report was saved but could not be emailed ({exc}).")
+    click.echo(
+        f"Week {report.week_start:%d %b} to {report.week_end:%d %b %Y}: {len(report.rows)} job(s). Saved: {report.path}"
+        + ("" if no_email or not settings.weekly_report_email else " (emailed)")
+    )
+
+
 @cli.command("report")
 def report() -> None:
     """Re-render the latest recommendation digest to the console (no send)."""

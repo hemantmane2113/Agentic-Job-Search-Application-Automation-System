@@ -354,6 +354,12 @@ class Settings(BaseSettings):
     # score, application status, freshness label, or URL.
     explanation_use_llm: bool = False
 
+    # --- Weekly report (`naukri-agent weekly-report`, run by a scheduled task every Sunday at 22:00) ---
+    # One Excel file with every job given during the Monday-Sunday week and where each one stands, saved here and
+    # emailed to NOTIFY_EMAIL_TO as an attachment.
+    weekly_report_dir: Path = Path("./out/weekly")
+    weekly_report_email: bool = True
+
     # --- Excel reporting mirror (regenerated from the DB every run) ---
     excel_export_enabled: bool = True
     excel_path: Path = Path("./out/job_search_history.xlsx")

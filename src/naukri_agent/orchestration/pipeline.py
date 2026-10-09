@@ -479,7 +479,7 @@ def run_daily_recommendations(
             seq += 1
             add_run_event(session, daily_run_id=run_id, seq=seq, stage="telegram_ping",
                           status=RunEventStatus.OK if ping[0] else RunEventStatus.FAILED,
-                          detail={"jobs": ping[1]})
+                          detail={"jobs": ping[1], "job_ids": ping[2]})  # the ids feed the weekly report
 
         return DailyRunResult(
             run_id=run_id,
@@ -545,10 +545,10 @@ def _ping_apply_ready(session, candidate_id, settings, now, notify):
 
             notify = build_telegram_interaction(settings).notify
         notify(text)
-        return True, len(jobs)
+        return True, len(jobs), [j["job_id"] for j in jobs[:100]]
     except Exception as exc:  # noqa: BLE001 - the digest is already sent; the ping is a courtesy
         logger.warning("telegram ping failed: %s", type(exc).__name__)
-        return False, 0
+        return False, 0, []
 
 
 def _jr():

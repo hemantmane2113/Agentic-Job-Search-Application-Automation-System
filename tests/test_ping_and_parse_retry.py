@@ -65,7 +65,8 @@ def test_the_phone_is_told_which_jobs_are_ready_and_nothing_is_applied(tmp_path)
     assert "ds role - Acme" in text and "mle role - Acme" in text and "resume " in text
     assert "up to 4 today" in text and "nothing is applied until you tap Yes" in text
     assert "http" not in text  # no links or credentials in a chat message
-    assert events(factory, "telegram_ping") == [("OK", {"jobs": 2})]
+    (status, detail), = events(factory, "telegram_ping")
+    assert status == "OK" and detail["jobs"] == 2 and len(detail["job_ids"]) == 2  # the ids feed the weekly report
 
 
 def test_a_long_list_is_cut_to_five_with_a_count_of_the_rest(tmp_path):

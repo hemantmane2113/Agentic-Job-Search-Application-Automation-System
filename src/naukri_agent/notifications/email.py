@@ -23,13 +23,16 @@ from __future__ import annotations
 
 import datetime
 import logging
+import mimetypes
 import smtplib
 from abc import ABC, abstractmethod
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from naukri_agent.config import Settings
 from naukri_agent.notifications.exceptions import EmailConfigError, EmailSendError
@@ -42,6 +45,8 @@ class EmailMessage(BaseModel):
     subject: str
     text_body: str
     html_body: str | None = None
+    # Absolute paths of files to attach (the weekly Excel report). Empty for the daily digest.
+    attachments: list[str] = Field(default_factory=list)
 
 
 class SendResult(BaseModel):
@@ -75,6 +80,11 @@ class FileEmailSender(EmailSender):
             path.write_text(header + "\n" + message.text_body, encoding="utf-8")
             if message.html_body:
                 path.with_suffix(".html").write_text(message.html_body, encoding="utf-8")
+            if message.attachments:
+                path.write_text(
+                    header + f"Attachments: {', '.join(Path(p).name for p in message.attachments)}\n\n" + message.text_body,
+                    encoding="utf-8",
+                )
             logger.info("digest written to %s", path)
             return SendResult(sender="file", status="written", path=str(path))
         except Exception as exc:  # noqa: BLE001
@@ -88,6 +98,8 @@ class ConsoleEmailSender(EmailSender):
         try:
             print(f"Subject: {message.subject}\n")
             print(message.text_body)
+            if message.attachments:
+                print(f"Attachments: {', '.join(Path(p).name for p in message.attachments)}")
             return SendResult(sender="console", status="printed")
         except Exception as exc:  # noqa: BLE001
             raise EmailSendError(f"ConsoleEmailSender failed: {type(exc).__name__}") from exc
@@ -118,13 +130,27 @@ class SmtpEmailSender(EmailSender):
 
         try:
             # Built inside the try block so the module's "never log str(exc)" rule covers it too.
-            outer = MIMEMultipart("alternative")
+            outer = MIMEMultipart("mixed" if message.attachments else "alternative")
             outer["Subject"] = message.subject
             outer["From"] = self.username
             outer["To"] = to_addr
-            outer.attach(MIMEText(message.text_body, "plain", "utf-8"))
+            body_holder = MIMEMultipart("alternative") if message.attachments else outer
+            body_holder.attach(MIMEText(message.text_body, "plain", "utf-8"))
             if message.html_body:
-                outer.attach(MIMEText(message.html_body, "html", "utf-8"))
+                body_holder.attach(MIMEText(message.html_body, "html", "utf-8"))
+            if message.attachments:
+                outer.attach(body_holder)
+            for path_str in message.attachments:
+                file_path = Path(path_str)
+                ctype, encoding = mimetypes.guess_type(str(file_path))
+                if file_path.suffix.lower() == ".xlsx":
+                    ctype, encoding = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", None
+                maintype, subtype = (ctype.split("/", 1) if ctype and not encoding else ("application", "octet-stream"))
+                part = MIMEBase(maintype, subtype)
+                part.set_payload(file_path.read_bytes())  # an unreadable file is an EmailSendError below, type only
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=file_path.name)
+                outer.attach(part)
 
             with smtplib.SMTP(self.host, self.port, timeout=30) as server:
                 server.starttls()
