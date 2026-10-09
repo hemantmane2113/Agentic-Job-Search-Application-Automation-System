@@ -36,7 +36,12 @@ from naukri_agent.jobs.parser import JobParser
 from naukri_agent.jobs.skill_evidence import build_skill_evidence, merged_required_preferred
 from naukri_agent.matching.scorer import score_job
 from naukri_agent.orchestration.discovery import DiscoveryResult
-from naukri_agent.recommendations.builder import applied_via_agent_since, build_digest, previous_digest_time
+from naukri_agent.recommendations.builder import (
+    applied_via_agent_since,
+    build_digest,
+    company_site_status_since,
+    previous_digest_time,
+)
 from naukri_agent.reporting.excel import export_workbook
 from naukri_agent.resume.models import load_master_resume
 from naukri_agent.resume.registry import load_resume_registry
@@ -393,6 +398,9 @@ def run_daily_recommendations(
         digest.daily_total = settings.daily_job_total
         digest.applied_via_agent = applied_via_agent_since(  # Part 2 = what the app applied to since the last digest
             session, previous_digest_time(session, run_id, now)
+        )
+        digest.company_site_status = company_site_status_since(  # Part 3 = where recent company-website jobs stand
+            session, now, settings.followup_lookback_days, {r.job_id for r in digest.recommendations}
         )
         digest.notes.extend(notes)
         digest.profile_refresh_note = refresh_note

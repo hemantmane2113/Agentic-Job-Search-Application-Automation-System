@@ -23,7 +23,7 @@ from naukri_agent.database.models import (
     JobRecommendation,
     ResumeSelection,
 )
-from naukri_agent.database.repositories import canonical_job_id
+from naukri_agent.database.repositories import application_label, canonical_job_id
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ _JOBS_HEADERS = [
 ]
 _APPLICATIONS_HEADERS = [
     "Job ID", "Naukri Job ID", "Job Title", "Company", "Applied Date",
-    "Application Status", "Resume Used", "Notes",
+    "Application Status", "Label", "Resume Used", "Notes",
 ]
 _RUNS_HEADERS = [
     "Date", "Jobs Discovered", "Jobs Evaluated", "Recommendations",
@@ -162,6 +162,7 @@ def export_workbook(session: Session, path: "str | Path", settings=None) -> Exce
             app.company,
             _date(app.applied_at),
             app.status.value,
+            application_label(app),
             app.resume_id or "",
             app.notes or "",
         ])

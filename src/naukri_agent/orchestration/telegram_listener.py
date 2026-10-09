@@ -35,6 +35,7 @@ from typing import Any, Callable
 from naukri_agent.config import Settings
 from naukri_agent.notifications.telegram import TelegramChannel, TelegramError
 from naukri_agent.orchestration.apply_lock import apply_lock_held
+from naukri_agent.orchestration.followup import mark_reminder_handled, reminder_due, run_followup
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ HELP_TEXT = (
     "Phone control is on.\n"
     "/apply  - start applying (a card per job arrives; nothing is applied until you tap Yes)\n"
     "/status - how many jobs are ready, and how many you can still approve today\n"
+    "/applied - tell me which company-website jobs you applied to (also asked every evening)\n"
     "/help   - this list"
 )
 _BACKOFF_SECONDS = (10, 30, 60)
@@ -110,9 +112,12 @@ class Listener:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
         lock_held: Callable[[Any], bool] = apply_lock_held,
+        followup: Callable[..., str] = run_followup,
     ) -> None:
         self.settings, self.ch = settings, channel
         self._spawn, self._summary, self._clock, self._sleep, self._lock_held = spawn, summary, clock, sleep, lock_held
+        self._followup = followup
+        self._reminder_retry_at = 0.0  # when the database was busy at reminder time: try again after this
 
     # --- one command ---------------------------------------------------------------------------
 
@@ -136,6 +141,7 @@ class Listener:
 
     def handle(self, text: str) -> None:
         command = _command_of(text)
+        logger.info("telegram command received: %s", command[:20] or "(text)")  # the command word only, nothing else
         if command in ("/help", "/start"):
             self._say(HELP_TEXT)
         elif command == "/status":
@@ -150,6 +156,8 @@ class Listener:
             )
         elif command == "/apply":
             self._apply()
+        elif command == "/applied":
+            self._followup(self.settings, self.ch)
         elif command.startswith("/"):
             self._say("I do not know that command.\n" + HELP_TEXT)
 
@@ -191,6 +199,7 @@ class Listener:
         if self._lock_held(self.settings.telegram_apply_lock_file):
             self._sleep(_LOCKED_WAIT_SECONDS)
             return
+        self._maybe_remind()
         for text, sent_at in self.ch.poll_commands(25):
             age = None if sent_at is None else self._clock() - sent_at
             if age is not None and age > self.settings.telegram_listener_max_command_age_seconds:
@@ -198,6 +207,18 @@ class Listener:
                     self._say("That /apply is too old to act on (it was sent while the PC was off or busy). Send it again.")
                 continue
             self.handle(text)
+
+    def _maybe_remind(self) -> None:
+        """Once a day, at the reminder time: ask about company-website jobs still waiting for an answer (silent when
+        there are none). If the database is busy it tries again in 10 minutes."""
+        now = self._clock()
+        if now < self._reminder_retry_at or not reminder_due(self.settings, now):
+            return
+        status = self._followup(self.settings, self.ch, quiet_if_empty=True)
+        if status == "busy":
+            self._reminder_retry_at = now + 600
+        else:
+            mark_reminder_handled(self.settings, now)
 
     def run(self, should_stop: Callable[[], bool] = lambda: False) -> None:
         self._say(HELP_TEXT)
@@ -208,6 +229,10 @@ class Listener:
                 failures = 0
             except TelegramError as exc:
                 logger.warning("telegram listener: %s", exc)
+                self._sleep(_BACKOFF_SECONDS[min(failures, len(_BACKOFF_SECONDS) - 1)])
+                failures += 1
+            except Exception as exc:  # noqa: BLE001 - one bad command must not end phone control; reported by type only
+                logger.warning("telegram listener: a command failed (%s)", type(exc).__name__)
                 self._sleep(_BACKOFF_SECONDS[min(failures, len(_BACKOFF_SECONDS) - 1)])
                 failures += 1
 

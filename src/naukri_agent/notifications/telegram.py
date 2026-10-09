@@ -28,6 +28,8 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 _POLL_SECONDS = 25
+_WAIT_RETRY_PAUSE_S = 2  # a dropped connection while waiting for your tap: pause this long, then listen again
+_WAIT_MAX_CONSECUTIVE_ERRORS = 30  # only a connection that stays down for this many tries in a row ends the wait
 _YES = {"y", "yes", "ok", "apply", "go", "yep"}
 _NO = {"n", "no", "skip", "stop", "nope"}
 
@@ -84,10 +86,12 @@ class TelegramChannel:
         *,
         transport: Transport | None = None,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._chat_id = str(chat_id)
         self._transport = transport or http_transport(token)
         self._clock = clock
+        self._sleep = sleep
         self._offset: int | None = None
 
     # --- sending -----------------------------------------------------------------
@@ -131,6 +135,20 @@ class TelegramChannel:
         For the phone listener, which waits for "/apply" between runs."""
         out: list[tuple[str, int | None]] = []
         for update in self._poll(seconds):
+            cb = update.get("callback_query")
+            if cb and str(cb.get("message", {}).get("chat", {}).get("id")) == self._chat_id:
+                # A button tapped on a question that is no longer being waited on (it timed out, or the bot restarted).
+                # Say so, instead of leaving the button spinning as if it did something.
+                try:
+                    self._transport(
+                        "answerCallbackQuery",
+                        {"callback_query_id": cb.get("id"), "show_alert": True,
+                         "text": "That question has expired. Send /applied (or /apply) to start again."},
+                        10,
+                    )
+                except TelegramError:
+                    pass
+                continue
             msg = update.get("message")
             if msg and str(msg.get("chat", {}).get("id")) == self._chat_id and msg.get("text"):
                 date = msg.get("date")
@@ -144,9 +162,21 @@ class TelegramChannel:
 
     def _wait(self, timeout_s: float, accept: Callable[[str, str], Any]) -> Any:
         deadline = self._clock() + timeout_s
+        errors = 0
         while self._clock() < deadline:
             remaining = deadline - self._clock()
-            for update in self._poll(min(_POLL_SECONDS, max(1, int(remaining)))):
+            try:
+                updates = self._poll(min(_POLL_SECONDS, max(1, int(remaining))))
+            except TelegramError:
+                # A dropped or slow connection must not throw away the question you are in the middle of answering.
+                # Nothing was consumed (the offset only moves after a good reply), so just listen again.
+                errors += 1
+                if errors >= _WAIT_MAX_CONSECUTIVE_ERRORS:
+                    raise
+                self._sleep(_WAIT_RETRY_PAUSE_S)
+                continue
+            errors = 0
+            for update in updates:
                 got = self._own_chat(update)
                 if got is None:
                     continue

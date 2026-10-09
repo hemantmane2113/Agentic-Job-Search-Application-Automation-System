@@ -109,6 +109,37 @@ def _applied_block(i: int, a, tz_name: str) -> str:
     return "\n".join(lines)
 
 
+def _part3_block(i: int, c, tz_name: str) -> str:
+    lines = [f"{i}. {c.job_title} — {c.company}", f"   Status: {c.label}"]
+    if c.state == "waiting":
+        if c.later_count:
+            lines[-1] += f" (you put it off {c.later_count} time{'s' if c.later_count != 1 else ''})"
+        if c.direct_link:
+            lines.append(f"   Direct apply link: {c.direct_link}")
+        lines.append(f"   Naukri: {c.job_url}")
+    else:
+        when = _local_time(c.when, tz_name)
+        if when:
+            lines[-1] += f" — {when.split(',')[0]}"
+    return "\n".join(lines)
+
+
+def _part3(digest: RecommendationDigest, settings: Settings) -> str:
+    items = digest.company_site_status
+    waiting = sum(1 for c in items if c.state == "waiting")
+    out = [f"PART 3 — COMPANY-WEBSITE JOBS: WHERE THEY STAND ({len(items)})"]
+    if not items:
+        out.append(f"No company-website jobs from the last {settings.followup_lookback_days} days (other than today's Part 1).")
+        return "\n".join(out)
+    out.append(f"From the last {settings.followup_lookback_days} days, not counting today's Part 1.")
+    if waiting:
+        how = "send /applied to your Telegram bot" if settings.telegram_remote_start else "run naukri-agent mark-applied <job>"
+        out.append(f"{waiting} still waiting for your answer: {how}.")
+    out.append("")
+    out.append("\n\n".join(_part3_block(i, c, settings.timezone) for i, c in enumerate(items, 1)))
+    return "\n".join(out)
+
+
 def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailMessage:
     date_str = digest.run_date.strftime("%d %b %Y")
     n1, n2 = digest.count, len(digest.applied_via_agent)
@@ -152,6 +183,7 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
     sections.append("\n".join(part1))
     sections += [_block(r) for r in digest.recommendations]
     sections.append("\n".join(part2))
+    sections.append(_part3(digest, settings))
     if digest.native_waiting:
         s = "" if digest.native_waiting == 1 else "s"
         sections.append(
@@ -163,7 +195,8 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
         )
     body = "\n\n".join(sections) + (
         "\n\n---\n"
-        "Part 1 applications are manual. Part 2 were made by the app only after you tapped Yes on Telegram.\n"
+        "Part 1 applications are manual. Part 2 were made by the app only after you tapped Yes on Telegram. "
+        "Part 3 shows what you told the app about company-website jobs.\n"
         "Application status is from your local database only.\n"
     )
     return EmailMessage(to=digest.candidate_email, subject=subject, text_body=body)

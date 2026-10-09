@@ -141,7 +141,9 @@ def doctor() -> None:
             f"{cd} day(s) "
             f"({'no cooldown' if cd == 0 else 'gate previously-recommended-not-applied jobs'})",
         ))
-        valid_status = {"NOT_APPLIED", "APPLIED", "INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN", "UNKNOWN"}
+        from naukri_agent.database.models import ApplicationStatus as _AppStatus
+
+        valid_status = set(_AppStatus.__members__)
         bad = [s for s in settings.recommendation_exclude_if_status if s.upper() not in valid_status]
         checks.append((
             "recommendation_exclude_if_status",
@@ -689,7 +691,7 @@ def mark_applied(job: str, resume_id, status, applied_date, note) -> None:
 @click.argument("status")
 @click.option("--note", "note", default=None)
 def mark_status(job: str, status: str, note) -> None:
-    """Set the application status of a job (NOT_APPLIED / APPLIED / INTERVIEW / OFFER / REJECTED / WITHDRAWN / UNKNOWN)."""
+    """Set the application status of a job (NOT_APPLIED / APPLIED / INTERVIEW / OFFER / REJECTED / WITHDRAWN / NOT_APPLYING / IGNORED / UNKNOWN)."""
     from naukri_agent.database.base import session_scope
     from naukri_agent.database.models import ApplicationStatus
     from naukri_agent.database.repositories import resolve_canonical_job, set_application_status
@@ -711,7 +713,7 @@ def applications(status) -> None:
     """List recorded applications (the authoritative application history)."""
     from naukri_agent.database.base import session_scope
     from naukri_agent.database.models import ApplicationStatus
-    from naukri_agent.database.repositories import list_applications
+    from naukri_agent.database.repositories import application_label, list_applications
 
     settings = get_settings()
     factory = init_db(settings)
@@ -722,6 +724,7 @@ def applications(status) -> None:
             {
                 "job_id": r.job_id, "external_job_id": r.external_job_id,
                 "title": r.job_title, "company": r.company, "status": r.status.value,
+                "label": application_label(r),
                 "applied_at": str(r.applied_at) if r.applied_at else None,
                 "resume_id": r.resume_id, "url": r.job_url,
             }

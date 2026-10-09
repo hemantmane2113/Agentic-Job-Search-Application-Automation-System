@@ -20,6 +20,7 @@ from naukri_agent.database.models import (
     ApplicationQuestion,
     ApplicationStatus,
     Candidate,
+    FollowupPrompt,
     Job,
     JobExtraction,
     JobExtractionSkillEvidence,
@@ -527,6 +528,41 @@ def get_application_history(session: Session, job_id: int) -> ApplicationHistory
     )
 
 
+LABEL_APPLIED_DIRECTLY = "applied directly"
+LABEL_APPLIED_COMPANY = "applied through company website"
+LABEL_NOT_APPLIED = "not applied"
+LABEL_IGNORED = "ignored"
+
+
+def derive_apply_label(status: ApplicationStatus, source: str | None) -> str | None:
+    """The plain-words label for a status, or None when the status does not change it (interview, offer...)."""
+    if status == ApplicationStatus.APPLIED:
+        # the app applied on Naukri itself after your Yes -> "directly"; everything you did yourself -> company website
+        return LABEL_APPLIED_DIRECTLY if (source or "").startswith("agent_auto_apply") else LABEL_APPLIED_COMPANY
+    if status == ApplicationStatus.NOT_APPLYING:
+        return LABEL_NOT_APPLIED
+    if status == ApplicationStatus.IGNORED:
+        return LABEL_IGNORED
+    return None
+
+
+def application_label(row: "ApplicationHistory") -> str:
+    """The stored label, or the one derived from status + source for rows written before labels existed."""
+    return row.apply_label or derive_apply_label(row.status, row.source) or row.status.value.replace("_", " ").lower()
+
+
+def backfill_apply_labels(session: Session) -> int:
+    """Give every row that has no label the one it would have had. Safe to repeat. Returns how many were set."""
+    n = 0
+    for row in session.query(ApplicationHistory).filter(ApplicationHistory.apply_label.is_(None)):
+        label = derive_apply_label(row.status, row.source)
+        if label:
+            row.apply_label = label
+            n += 1
+    session.flush()
+    return n
+
+
 def upsert_application_history(
     session: Session,
     job_id: int,
@@ -538,6 +574,7 @@ def upsert_application_history(
     resume_file_hash: str | None = None,
     source: str = "manual_cli",
     note: str | None = None,
+    apply_label: str | None = None,
 ) -> tuple[ApplicationHistory, bool]:
     """
     Create or update the ONE ApplicationHistory row for a job's
@@ -566,6 +603,7 @@ def upsert_application_history(
             resume_file_hash=resume_file_hash,
             source=source,
             notes=note,
+            apply_label=apply_label or derive_apply_label(status, source),
         )
         session.add(row)
         session.flush()
@@ -594,6 +632,9 @@ def upsert_application_history(
     if note is not None:
         existing.notes = note
     existing.source = source
+    new_label = apply_label or derive_apply_label(status, source)
+    if new_label:
+        existing.apply_label = new_label
     existing.updated_at = now
     session.add(
         ApplicationEvent(
@@ -636,6 +677,88 @@ def excluded_job_ids_by_status(
         .all()
     )
     return {r[0] for r in rows}
+
+
+def followup_candidates(session: Session, now: "datetime.datetime", lookback_days: int, limit: int = 12) -> list[dict]:
+    """
+    Company-website jobs that were in a recent digest and that you have not answered for yet: the ones the Telegram
+    "did you apply?" question is about. Newest first. A job with a recorded status (applied, not applying, ignored...)
+    is never here. Pure reads.
+    """
+    from naukri_agent.database.models import JobRecommendation
+
+    since = _naive_utc(now) - datetime.timedelta(days=lookback_days)
+    latest: dict[int, datetime.datetime] = {}
+    for job_id, when in session.query(JobRecommendation.job_id, JobRecommendation.recommended_at).filter(
+        JobRecommendation.recommended_at >= since
+    ):
+        if job_id not in latest or when > latest[job_id]:
+            latest[job_id] = when
+    out: list[dict] = []
+    for job_id, when in sorted(latest.items(), key=lambda kv: kv[1], reverse=True):
+        job = session.get(Job, canonical_job_id(session, job_id))
+        if job is None or job.apply_type != "company_site":
+            continue
+        if any(o["job_id"] == job.id for o in out):
+            continue
+        if application_status_for_job(session, job.id) not in (ApplicationStatus.NOT_APPLIED, ApplicationStatus.UNKNOWN):
+            continue
+        prompt = session.query(FollowupPrompt).filter_by(job_id=job.id).one_or_none()
+        sel = latest_resume_selection(session, job.id)
+        out.append({
+            "job_id": job.id, "title": job.title, "company": job.company, "location": job.location,
+            "url": job.url, "apply_redirect_url": job.apply_redirect_url,
+            "resume_id": sel.resume_id if sel is not None else None,
+            "later_count": prompt.later_count if prompt is not None else 0,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def record_followup_answer(
+    session: Session, job_id: int, answer: str, *, ignore_after_later: int, now: "datetime.datetime | None" = None
+) -> tuple[str, int]:
+    """
+    Record your answer to "did you apply?". answer: "applied" | "not_applying" | "later".
+    Returns (outcome, later_count) where outcome is "applied", "not_applying", "later" or "ignored".
+    The `ignore_after_later`-th "Later" in a row turns the job into IGNORED. Applied / not applying settle it at once.
+    """
+    now = now or datetime.datetime.now(datetime.UTC)
+    canon = canonical_job_id(session, job_id)
+    if answer not in ("applied", "not_applying", "later"):
+        raise ValueError(f"unknown answer {answer!r}")
+    prompt = session.query(FollowupPrompt).filter_by(job_id=canon).one_or_none()
+    if prompt is None and answer == "later":  # a counter row only ever exists for a job you have put off
+        prompt = FollowupPrompt(job_id=canon, later_count=0)
+        session.add(prompt)
+    if prompt is not None:
+        prompt.last_asked_at = _naive_utc(now)
+    if answer == "applied":
+        sel = latest_resume_selection(session, canon)
+        upsert_application_history(
+            session, canon, status=ApplicationStatus.APPLIED, resume_id=sel.resume_id if sel is not None else None,
+            source="telegram_followup", note="You confirmed on Telegram that you applied on the company's website.",
+        )
+        session.flush()
+        return "applied", prompt.later_count if prompt is not None else 0
+    if answer == "not_applying":
+        upsert_application_history(
+            session, canon, status=ApplicationStatus.NOT_APPLYING, source="telegram_followup",
+            note="You said on Telegram that you are not applying.",
+        )
+        session.flush()
+        return "not_applying", prompt.later_count if prompt is not None else 0
+    prompt.later_count += 1
+    if prompt.later_count >= ignore_after_later:
+        upsert_application_history(
+            session, canon, status=ApplicationStatus.IGNORED, source="telegram_followup",
+            note=f"You answered Later {prompt.later_count} times in a row, so it is ignored from now on.",
+        )
+        session.flush()
+        return "ignored", prompt.later_count
+    session.flush()
+    return "later", prompt.later_count
 
 
 def list_applications(

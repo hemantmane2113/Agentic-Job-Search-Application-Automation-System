@@ -348,6 +348,29 @@ only for the one `telegram-apply` process it starts (the listener's own settings
 never imports any apply code; and while an apply run is going it does not read Telegram, because the run is
 reading your taps. The PC must be on and logged in, since the clicking happens in its browser.
 
+## "Did you apply?" for company-website jobs
+
+The app cannot see what you do on a company's own site, so those jobs used to stay unrecorded unless you ran
+`mark-applied`. The phone listener (above) now asks on Telegram, one job at a time, with three buttons:
+
+| Button | What is recorded | Label in the history |
+|---|---|---|
+| **Applied** | applied, with the resume that was suggested | `applied through company website` |
+| **Not applying** | a decision; the job is never suggested again | `not applied` |
+| **Later** | nothing yet; asked again next time. The 4th Later in a row for the same job records it as ignored and it is never suggested again | `ignored` |
+
+Jobs the app itself applied to after your Yes on Telegram are labelled `applied directly`.
+
+It asks when you send `/applied`, and once a day at `FOLLOWUP_REMINDER_TIME` (default 20:00, your `TIMEZONE`) when some
+job is still waiting; with nothing waiting it stays silent. It asks only about company-website jobs from digests in the
+last `FOLLOWUP_LOOKBACK_DAYS` (7) that have no record yet, at most `FOLLOWUP_MAX_JOBS` (12) at a time, and
+`FOLLOWUP_IGNORE_AFTER_LATER` (4) sets how many Laters in a row end it. No tap within
+`FOLLOWUP_ANSWER_TIMEOUT_MINUTES` (15) stops the questions and changes nothing. Turn the evening reminder off with
+`FOLLOWUP_REMINDER_ENABLED=false`. The label is in the `Applications` sheet of the Excel file and in
+`naukri-agent applications`.
+
+**Part 3 of the digest** lists these company-website jobs from the last `FOLLOWUP_LOOKBACK_DAYS` days (not today's Part 1) and where each one stands: waiting for your answer (shown first, with its direct link), applied through company website, not applied, or ignored.
+
 ## Email setup
 
 Digest delivery has three modes, selected by `EMAIL_SENDER`:

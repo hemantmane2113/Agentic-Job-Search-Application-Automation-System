@@ -82,6 +82,21 @@ class AppliedViaAgent(BaseModel):
     answers: list[tuple[str, str]] = Field(default_factory=list)  # (question, answer sent)
 
 
+class CompanySiteStatus(BaseModel):
+    """Where one company-website job from a recent digest stands, for the email's Part 3."""
+
+    job_title: str
+    company: str
+    location: str | None = None
+    job_url: str
+    direct_link: str | None = None
+    # "waiting" (no answer yet) | "applied" | "not_applied" | "ignored" | "other" (interview, offer, ...)
+    state: str
+    label: str  # in plain words, e.g. "applied through company website"
+    when: datetime.datetime | None = None  # naive UTC: when it was applied / answered
+    later_count: int = 0  # times you answered "Later" so far (waiting jobs)
+
+
 class RecommendationDigest(BaseModel):
     run_date: datetime.date
     generated_at: datetime.datetime
@@ -105,3 +120,5 @@ class RecommendationDigest(BaseModel):
     profile_refresh_note: str | None = None  # what the day's first step (profile refresh) did
     native_waiting: int = 0  # eligible jobs with a Naukri Apply button, left for telegram-apply
     applied_via_agent: list[AppliedViaAgent] = Field(default_factory=list)
+    # Part 3: company-website jobs from the last few days' digests and where each stands (not today's Part 1 jobs)
+    company_site_status: list[CompanySiteStatus] = Field(default_factory=list)

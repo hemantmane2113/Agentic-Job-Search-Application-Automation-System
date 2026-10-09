@@ -167,7 +167,7 @@ def _status_label(status: ApplicationStatus, applied_at: datetime.datetime | Non
         return "Unknown"
     if status == ApplicationStatus.APPLIED:
         return f"Previously applied — {_fmt_date(applied_at)}"
-    pretty = status.value.capitalize()
+    pretty = status.value.replace("_", " ").capitalize()
     return f"{pretty} — {_fmt_date(applied_at)}" if applied_at else pretty
 
 
@@ -451,3 +451,61 @@ def applied_via_agent_since(session: Session, since: datetime.datetime, limit: i
             )
         )
     return out
+
+
+def company_site_status_since(
+    session: Session, now: datetime.datetime, lookback_days: int, exclude_job_ids: "set[int] | None" = None, limit: int = 20
+):
+    """
+    Part 3 of the email: every company-website job that was in a digest in the last `lookback_days` days, except the ones in
+    today's Part 1 (`exclude_job_ids`), with where it stands: still waiting for your answer, applied (and how), not applied,
+    or ignored. Jobs waiting for an answer come first (newest first), then the settled ones (newest first). Pure reads.
+    """
+    from naukri_agent.database.models import ApplicationHistory, FollowupPrompt, JobRecommendation
+    from naukri_agent.database.repositories import application_label, canonical_job_id
+    from naukri_agent.recommendations.models import CompanySiteStatus
+
+    exclude = set(exclude_job_ids or ())
+    since = _naive_utc(now) - datetime.timedelta(days=lookback_days)
+    latest: dict[int, datetime.datetime] = {}
+    for job_id, when in session.query(JobRecommendation.job_id, JobRecommendation.recommended_at).filter(
+        JobRecommendation.recommended_at >= since
+    ):
+        canon = canonical_job_id(session, job_id)
+        if canon not in latest or when > latest[canon]:
+            latest[canon] = when
+    waiting: list[CompanySiteStatus] = []
+    settled: list[tuple[datetime.datetime, CompanySiteStatus]] = []
+    for canon, recommended_at in sorted(latest.items(), key=lambda kv: kv[1], reverse=True):
+        if canon in exclude:
+            continue
+        job = session.get(Job, canon)
+        if job is None or job.apply_type != "company_site":
+            continue
+        row = session.query(ApplicationHistory).filter_by(job_id=canon).one_or_none()
+        base = dict(
+            job_title=job.title, company=job.company, location=job.location, job_url=job.url,
+            direct_link=job.apply_redirect_url,
+        )
+        status = row.status if row is not None else ApplicationStatus.NOT_APPLIED
+        if status in (ApplicationStatus.NOT_APPLIED, ApplicationStatus.UNKNOWN):
+            prompt = session.query(FollowupPrompt).filter_by(job_id=canon).one_or_none()
+            waiting.append(CompanySiteStatus(
+                **base, state="waiting", label="waiting for your answer", when=recommended_at,
+                later_count=prompt.later_count if prompt is not None else 0,
+            ))
+            continue
+        stamp = row.applied_at or row.updated_at
+        if status == ApplicationStatus.NOT_APPLYING:
+            state = "not_applied"
+        elif status == ApplicationStatus.IGNORED:
+            state = "ignored"
+        elif status == ApplicationStatus.APPLIED:
+            state = "applied"
+        else:
+            state = "other"
+        settled.append((stamp or recommended_at, CompanySiteStatus(
+            **base, state=state, label=application_label(row), when=stamp,
+        )))
+    settled.sort(key=lambda pair: pair[0], reverse=True)
+    return (waiting + [item for _stamp, item in settled])[:limit]

@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     telegram_listener_max_command_age_seconds: int = 600  # an older "/apply" (sent while the PC was off) is ignored
     telegram_listener_run_timeout_minutes: int = 180  # the apply run it starts is stopped after this long
     telegram_apply_lock_file: Path = Path("./data/telegram_apply.lock")  # held while a telegram-apply run is going
+    # "Did you apply?" for company-website jobs, asked on Telegram by the phone listener: when you send /applied, and as
+    # a reminder every day at followup_reminder_time (only when a job is still waiting for an answer).
+    followup_reminder_enabled: bool = True
+    followup_reminder_time: str = "20:00"  # 24-hour HH:MM, in `timezone`
+    followup_lookback_days: int = 7  # jobs from digests older than this are not asked about
+    followup_max_jobs: int = 12  # at most this many questions in one go
+    followup_ignore_after_later: int = 4  # the 4th "Later" in a row turns the job into "ignored"
+    followup_answer_timeout_minutes: int = 15  # no tap in this time ends the questions; nothing is changed
+    followup_state_file: Path = Path("./data/followup_state.json")  # the day the reminder last went out
     telegram_approval_timeout_minutes: int = 20  # waiting for the job's Yes/No
     telegram_answer_timeout_minutes: int = 15  # waiting for each answer / final Yes
 
@@ -259,7 +268,10 @@ class Settings(BaseSettings):
     # ApplicationHistory statuses that exclude a job from ALL future
     # recommendations, regardless of cooldown.
     recommendation_exclude_if_status: list[str] = Field(
-        default_factory=lambda: ["APPLIED", "INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN"]
+        default_factory=lambda: [
+            "APPLIED", "INTERVIEW", "OFFER", "REJECTED", "WITHDRAWN",
+            "NOT_APPLYING", "IGNORED",  # your answers to the Telegram "did you apply?" question: never suggested again
+        ]
     )
     # MatchDecisions eligible for the digest.
     recommendation_decisions: list[str] = Field(
@@ -327,6 +339,14 @@ class Settings(BaseSettings):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
         return f"{hour:02d}:{minute:02d}"
+
+    @field_validator("followup_reminder_time")
+    @classmethod
+    def _validate_followup_reminder_time(cls, v: str) -> str:
+        parts = v.strip().split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts) or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
+            raise ValueError(f"followup_reminder_time must be 'HH:MM' (24-hour), got {v!r}")
+        return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
 
     # --- Match explanation ---
     # Optional NL polish over the deterministic reasons/gaps. The

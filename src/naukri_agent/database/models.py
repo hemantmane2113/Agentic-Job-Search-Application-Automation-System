@@ -450,6 +450,9 @@ class ApplicationStatus(str, enum.Enum):
     REJECTED = "REJECTED"
     WITHDRAWN = "WITHDRAWN"
     UNKNOWN = "UNKNOWN"
+    # Answers to the Telegram "did you apply?" question for company-website jobs (never suggested again):
+    NOT_APPLYING = "NOT_APPLYING"  # you said "Not applying"
+    IGNORED = "IGNORED"  # you said "Later" too many times in a row
 
 
 class RunEventStatus(str, enum.Enum):
@@ -494,6 +497,9 @@ class ApplicationHistory(Base):
 
     source: Mapped[str] = mapped_column(String(50), default="manual_cli", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # In plain words, for reading the history: "applied directly" (the app applied on Naukri after your Yes),
+    # "applied through company website", "not applied" or "ignored". Derived from status + source when not given.
+    apply_label: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
@@ -509,6 +515,25 @@ class ApplicationHistory(Base):
             f"<ApplicationHistory id={self.id} job_id={self.job_id} "
             f"status={self.status.value}>"
         )
+
+
+class FollowupPrompt(Base):
+    """
+    How many times you have answered "Later" to the Telegram question "did you apply?" for a company-website job.
+    One row per CANONICAL job id. The Nth "Later" in a row turns the job into IGNORED (see
+    settings.followup_ignore_after_later); any other answer settles it, so a row only ever counts a run of Laters.
+    """
+
+    __tablename__ = "followup_prompts"
+    __table_args__ = (UniqueConstraint("job_id", name="uq_followup_prompt_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    later_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_asked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), nullable=False
+    )
 
 
 class ApplicationEvent(Base):
