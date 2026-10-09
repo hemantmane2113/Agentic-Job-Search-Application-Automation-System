@@ -102,6 +102,8 @@ class JobDetail(BaseModel):
     # "native" | "company_site" | "none" -- how this listing can be applied to,
     # read from the page already loaded for the JD (no extra navigation).
     apply_type: str | None = None
+    # The employer's own address for a company-site job, from the job data Naukri's page loads (browser/company_link.py).
+    apply_redirect_url: str | None = None
     # Naukri's own 'Employment Type' line, e.g. 'Full Time, Permanent'. None when the page shows none.
     employment_type_text: str | None = None
 

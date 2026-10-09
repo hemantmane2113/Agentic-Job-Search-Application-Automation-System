@@ -362,6 +362,7 @@ def discover_and_store(
             source=detail.source,
             apply_type=detail.apply_type,
             employment_type_text=detail.employment_type_text,
+            apply_redirect_url=detail.apply_redirect_url,
         )
         job, created = upsert_job(session, job_create, run_id=run_id)
         # Raw skill evidence (ld+json `skills` / Key Skills DOM chips) --

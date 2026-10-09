@@ -50,38 +50,66 @@ def _address_in(body: bytes | str | None) -> str | None:
     return url.strip() if _is_company_address(url) else None
 
 
-def read_direct_apply_link(page: Any, job_url: str, *, wait_ms: int = 12000) -> CompanySiteLink:
-    state: dict[str, Any] = {"url": None, "answered": False}
+class ApplyLinkWatcher:
+    """Watches a page's own GET responses for the job data that holds the employer's address. Start it BEFORE the
+    page is opened; it only listens, and sends nothing."""
 
-    def on_response(resp: Any) -> None:
+    def __init__(self, page: Any) -> None:
+        self._page = page
+        self.url: str | None = None
+        self.answered = False  # the job data arrived (with or without an address)
+        self._started = False
+
+    def _on_response(self, resp: Any) -> None:
         try:
             if resp.request.method != "GET" or _JOB_API_PATH not in urlsplit(resp.url).path:
                 return
-            state["answered"] = True
+            self.answered = True
             found = _address_in(resp.body())
-            if found and state["url"] is None:
-                state["url"] = found
+            if found and self.url is None:
+                self.url = found
         except Exception:  # noqa: BLE001 - a response that cannot be read is simply not the one
             pass
 
-    page.on("response", on_response)
+    def start(self) -> "ApplyLinkWatcher":
+        try:
+            self._page.on("response", self._on_response)
+            self._started = True
+        except Exception:  # noqa: BLE001 - a page that cannot listen just yields no link
+            pass
+        return self
+
+    def wait(self, max_ms: int) -> None:
+        """Give the job data up to max_ms to arrive; returns at once when it already has."""
+        waited = 0
+        while self._started and not self.answered and waited < max_ms:
+            try:
+                self._page.wait_for_timeout(_POLL_MS)
+            except Exception:  # noqa: BLE001
+                break
+            waited += _POLL_MS
+
+    def stop(self) -> None:
+        remove = getattr(self._page, "remove_listener", None)
+        if self._started and remove is not None:
+            try:
+                remove("response", self._on_response)
+            except Exception:  # noqa: BLE001
+                pass
+        self._started = False
+
+
+def read_direct_apply_link(page: Any, job_url: str, *, wait_ms: int = 12000) -> CompanySiteLink:
+    watcher = ApplyLinkWatcher(page).start()
     try:
         page.goto(job_url)
         page.wait_for_load_state("domcontentloaded", timeout=30000)
-        waited = 0
-        while not state["answered"] and waited < wait_ms:
-            page.wait_for_timeout(_POLL_MS)
-            waited += _POLL_MS
+        watcher.wait(wait_ms)
     finally:
-        remove = getattr(page, "remove_listener", None)
-        if remove is not None:
-            try:
-                remove("response", on_response)
-            except Exception:  # noqa: BLE001
-                pass
+        watcher.stop()
 
-    if state["url"]:
-        return CompanySiteLink(state["url"], "read from the job data Naukri's own page loaded; nothing was pressed or applied")
-    if state["answered"]:
+    if watcher.url:
+        return CompanySiteLink(watcher.url, "read from the job data Naukri's own page loaded; nothing was pressed or applied")
+    if watcher.answered:
         return CompanySiteLink(None, "Naukri's job data holds no company address for this job")
     return CompanySiteLink(None, f"Naukri's job data did not load within {wait_ms // 1000}s")

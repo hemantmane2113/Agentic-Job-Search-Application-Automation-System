@@ -36,7 +36,13 @@ def _apply_line(rec: Recommendation) -> str | None:
     """How to apply, from the page's own apply button. Nothing is shown when
     it was never checked or the page had no apply control."""
     if rec.apply_type == "company_site":
-        return "   How to apply: ON THE COMPANY'S WEBSITE - apply manually (use the link below, then run mark-applied)"
+        text = "   How to apply: ON THE COMPANY'S WEBSITE - apply manually (use the link below, then run mark-applied)"
+        if rec.apply_redirect_url:
+            text = (
+                "   How to apply: ON THE COMPANY'S WEBSITE - apply manually, then run mark-applied\n"
+                f"   Direct apply link: {rec.apply_redirect_url}"
+            )
+        return text
     if rec.apply_type == "native":
         return "   How to apply: Naukri Apply button"
     return None

@@ -124,6 +124,8 @@ def upsert_job(
             existing.apply_type = job.apply_type
         if job.employment_type_text is not None:
             existing.employment_type_text = job.employment_type_text
+        if job.apply_redirect_url is not None:
+            existing.apply_redirect_url = job.apply_redirect_url
         existing.content_fingerprint = fingerprint
         existing.last_seen_at = now
         existing.times_seen += 1
@@ -159,6 +161,7 @@ def upsert_job(
         source=job.source,
         apply_type=job.apply_type,
         employment_type_text=job.employment_type_text,
+        apply_redirect_url=job.apply_redirect_url,
         content_fingerprint=fingerprint,
         repost_of_job_id=repost_of.id if repost_of is not None else None,
         discovered_at=now,

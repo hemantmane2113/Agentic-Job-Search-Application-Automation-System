@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 _DETAIL_SETTLE_TIMEOUT_MS = 15000
 
 
+_APPLY_LINK_WAIT_MS = 3000  # extra time for the page's job data, only if it has not arrived yet
+
+
 def fetch_job_detail(page: Any, url: str) -> JobDetail:
     """
     Open a job's public listing DETAIL page and READ its content.
@@ -42,10 +45,14 @@ def fetch_job_detail(page: Any, url: str) -> JobDetail:
     workflow. Every field degrades to None independently; a parse miss
     never raises. A ``goto`` failure returns a bare ``JobDetail(url=...)``.
     """
+    from naukri_agent.browser.company_link import ApplyLinkWatcher
+
+    watcher = ApplyLinkWatcher(page).start()  # listens only; started before the page opens so nothing is missed
     try:
         page.goto(url)
     except Exception as exc:  # noqa: BLE001
         logger.warning("fetch_job_detail: goto(%s) raised %s", url, exc)
+        watcher.stop()
         return JobDetail(url=url)
     for state in ("domcontentloaded", "load"):
         try:
@@ -93,6 +100,8 @@ def fetch_job_detail(page: Any, url: str) -> JobDetail:
     # other field above.
     ld_json_skills = _ld_skills(ld)
     key_skills_dom = _key_skills_dom(page)
+    watcher.wait(_APPLY_LINK_WAIT_MS)  # the job data usually arrived during the waits above
+    watcher.stop()
 
     return JobDetail(
         url=url,
@@ -107,6 +116,7 @@ def fetch_job_detail(page: Any, url: str) -> JobDetail:
         key_skills_dom=key_skills_dom,
         apply_type=_known_apply_type(page),
         employment_type_text=read_employment_type(page),
+        apply_redirect_url=watcher.url,
     )
 
 

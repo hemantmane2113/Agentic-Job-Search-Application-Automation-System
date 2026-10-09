@@ -138,6 +138,8 @@ class Job(Base):
     apply_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Naukri's own 'Employment Type' text (e.g. 'Full Time, Permanent'); NULL = not shown / not read yet.
     employment_type_text: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # The employer's own address for a company-site job, read from the job data Naukri's page loads; NULL = none / not read.
+    apply_redirect_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # Sighting bookkeeping
     discovered_at: Mapped[datetime.datetime] = mapped_column(

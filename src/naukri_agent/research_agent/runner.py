@@ -77,7 +77,7 @@ def select_jobs(session: Any, settings: Settings, now: datetime.datetime, *, job
             "employment_type": kind if kind and kind != "unknown" else None,
             "job_id": job.id, "title": job.title, "company": job.company, "location": job.location,
             "experience_text": job.experience_text, "salary_text": job.salary_text,
-            "description": job.description, "url": job.url,
+            "description": job.description, "url": job.url, "apply_redirect_url": job.apply_redirect_url,
         }
 
     if job_id is not None:  # an explicit request is always honoured, even for a job done recently
@@ -137,6 +137,9 @@ def format_report(job: dict, report: ResearchReport) -> str:
 def _with_direct_link(report: ResearchReport, reader: Any, job: dict, settings: Settings) -> ResearchReport:
     """Add the employer's own job address, read from the job data Naukri's page loads (nothing is pressed). Whatever
     goes wrong is reduced to a note: a missing link must never lose the rest of the research."""
+    stored = job.get("apply_redirect_url")
+    if stored:  # already read during the daily run's visit to the job page: no need to open it again
+        return report.model_copy(update={"direct_link": stored})
     try:
         pause(settings.browse_pause_min_seconds, settings.browse_pause_max_seconds)
         link = reader.direct_apply_link(job["url"])

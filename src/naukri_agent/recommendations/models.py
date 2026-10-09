@@ -66,6 +66,8 @@ class Recommendation(BaseModel):
     apply_type: str | None = None
     # Naukri's own Employment Type line (e.g. 'Full Time, Permanent'); None = the page showed none
     employment_type_text: str | None = None
+    # The employer's own address for a company-site job (from Job.apply_redirect_url); None = not read
+    apply_redirect_url: str | None = None
 
 
 class AppliedViaAgent(BaseModel):

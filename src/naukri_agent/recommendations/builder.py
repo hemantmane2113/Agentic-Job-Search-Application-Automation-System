@@ -366,6 +366,7 @@ def build_digest(
             naukri_url=job.url,  # ALWAYS from the DB
             apply_type=getattr(job, "apply_type", None),
             employment_type_text=getattr(job, "employment_type_text", None),
+            apply_redirect_url=getattr(job, "apply_redirect_url", None),
         )
         recs.append(rec)
         row = latest_job_match(session, candidate_id, canon_id)
