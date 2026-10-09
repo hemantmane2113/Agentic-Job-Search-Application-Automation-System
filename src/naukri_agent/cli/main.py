@@ -519,7 +519,15 @@ def telegram_apply(max_jobs: int | None) -> None:
     except ValueError as exc:
         raise click.ClickException(str(exc))
 
-    result = _explain_busy_database(lambda: run_auto_apply(settings, interaction=interaction, max_attempts=max_jobs))
+    from naukri_agent.orchestration.apply_lock import ApplyLockHeld, hold_apply_lock
+
+    try:
+        with hold_apply_lock(settings.telegram_apply_lock_file):
+            result = _explain_busy_database(
+                lambda: run_auto_apply(settings, interaction=interaction, max_attempts=max_jobs)
+            )
+    except ApplyLockHeld as exc:
+        raise click.ClickException(str(exc))
     if not result.blocked_reason:
         interaction.notify(
             f"Run finished: {result.applied} applied, {len(result.outcomes)} job(s) handled."
@@ -530,6 +538,30 @@ def telegram_apply(max_jobs: int | None) -> None:
         sys.exit(2)
     if any(o.outcome in ("failed", "unconfirmed") for o in result.outcomes):
         sys.exit(1)
+
+
+@cli.command("telegram-listen")
+def telegram_listen() -> None:
+    """
+    Stay running on the PC and wait for "/apply" from YOUR Telegram chat; then start
+    `telegram-apply` (you tap Yes on every job as usual). Also answers /status and /help.
+    Off unless TELEGRAM_REMOTE_START=true. Runs until you close it (Ctrl-C).
+    """
+    settings = get_settings()
+    if not settings.telegram_remote_start:
+        raise click.ClickException(
+            "Starting from the phone is off. Set TELEGRAM_REMOTE_START=true in .env to turn it on "
+            "(applying still needs your Yes tap on every job)."
+        )
+    from naukri_agent.orchestration.telegram_listener import run_listener
+
+    click.echo("Listening for /apply from your Telegram chat. Close this window or press Ctrl-C to stop.")
+    try:
+        run_listener(settings)
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+    except KeyboardInterrupt:
+        click.echo("Stopped.")
 
 
 # ---------------------------------------------------------------------------

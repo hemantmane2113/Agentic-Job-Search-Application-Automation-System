@@ -126,6 +126,17 @@ class TelegramChannel:
             return "button", str(cb.get("data") or "")
         return None
 
+    def poll_commands(self, seconds: int) -> list[tuple[str, int | None]]:
+        """Typed messages from OUR chat as (text, sent-at epoch seconds). Button taps and other chats are ignored.
+        For the phone listener, which waits for "/apply" between runs."""
+        out: list[tuple[str, int | None]] = []
+        for update in self._poll(seconds):
+            msg = update.get("message")
+            if msg and str(msg.get("chat", {}).get("id")) == self._chat_id and msg.get("text"):
+                date = msg.get("date")
+                out.append((str(msg["text"]).strip(), int(date) if date is not None else None))
+        return out
+
     def drain(self) -> None:
         """Discard everything already waiting, so only replies to the NEXT prompt are read."""
         while self._poll(0):

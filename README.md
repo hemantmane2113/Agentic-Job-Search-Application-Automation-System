@@ -325,6 +325,29 @@ Scheduler → Run. This executes the real command immediately, so only
 do this once you're ready for a real run (same considerations as
 running `naukri-agent run-daily` by hand).
 
+## Start applying from your phone
+
+`telegram-apply` needs a terminal on the PC. To start it from your phone instead, leave one small process
+running on the PC:
+
+```
+naukri-agent telegram-listen
+```
+
+It is off unless `TELEGRAM_REMOTE_START=true` is set in `.env`. Then, from your own Telegram chat with the bot:
+
+| Send | What happens |
+|---|---|
+| `/apply` | starts `telegram-apply`; a card per job arrives, and nothing is applied until you tap Yes |
+| `/status` | how many jobs are ready and how many approvals are left today |
+| `/help` | the list of commands |
+
+How it stays safe: only your configured chat is obeyed; an `/apply` older than
+`TELEGRAM_LISTENER_MAX_COMMAND_AGE_SECONDS` (default 600) is ignored; `AUTO_APPLY=true` and `DRY_RUN=false` are set
+only for the one `telegram-apply` process it starts (the listener's own settings never change); the listener
+never imports any apply code; and while an apply run is going it does not read Telegram, because the run is
+reading your taps. The PC must be on and logged in, since the clicking happens in its browser.
+
 ## Email setup
 
 Digest delivery has three modes, selected by `EMAIL_SENDER`:

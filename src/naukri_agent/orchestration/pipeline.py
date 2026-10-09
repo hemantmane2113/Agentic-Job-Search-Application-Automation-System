@@ -493,7 +493,7 @@ _PING_LIST_MAX = 5
 from naukri_agent.recommendations.employment import describe as describe_employment  # noqa: E402
 
 
-def _apply_ready_text(jobs: list[dict], remaining: int, cap: int) -> str:
+def _apply_ready_text(jobs: list[dict], remaining: int, cap: int, remote_start: bool = False) -> str:
     lines = [f"Naukri: {len(jobs)} job(s) ready to apply via Telegram (ACCEPT, Naukri Apply button).", ""]
     for i, j in enumerate(jobs[:_PING_LIST_MAX], 1):
         resume = j.get("resume_id") or "no role match"
@@ -503,7 +503,8 @@ def _apply_ready_text(jobs: list[dict], remaining: int, cap: int) -> str:
     lines.append("")
     if remaining > 0:
         lines.append(f"You can approve up to {remaining} today (limit {cap} per 24h).")
-        lines.append("Start with your usual telegram-apply command; nothing is applied until you tap Yes on each job.")
+        start = "Send /apply here to start" if remote_start else "Start with your usual telegram-apply command"
+        lines.append(f"{start}; nothing is applied until you tap Yes on each job.")
     else:
         lines.append(f"The daily limit ({cap} per 24h) is already used, so these wait for a later day.")
     return "\n".join(lines)
@@ -530,7 +531,7 @@ def _ping_apply_ready(session, candidate_id, settings, now, notify):
         remaining = max(
             0, settings.auto_apply_daily_cap - auto_apply_count_since(session, now - datetime.timedelta(hours=24))
         )
-        text = _apply_ready_text(jobs, remaining, settings.auto_apply_daily_cap)
+        text = _apply_ready_text(jobs, remaining, settings.auto_apply_daily_cap, settings.telegram_remote_start)
         if notify is None:
             from naukri_agent.orchestration.telegram_interaction import build_telegram_interaction
 

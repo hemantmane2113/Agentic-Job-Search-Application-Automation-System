@@ -151,7 +151,9 @@ def _render_two_part(digest: RecommendationDigest, settings: Settings) -> EmailM
         sections.append(
             f"{digest.native_waiting} more matching job{s} with a Naukri Apply button "
             f"{'is' if digest.native_waiting == 1 else 'are'} ready for Telegram "
-            f"(you can approve up to {digest.telegram_slots} today). Run: naukri-agent telegram-apply"
+            f"(you can approve up to {digest.telegram_slots} today). "
+            + ("Send /apply to your Telegram bot to start, or run: naukri-agent telegram-apply"
+               if settings.telegram_remote_start else "Run: naukri-agent telegram-apply")
         )
     body = "\n\n".join(sections) + (
         "\n\n---\n"

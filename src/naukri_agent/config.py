@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     # attempt fixes (a timeout, a malformed reply). Retry once, at most this many times per run
     # in total, so a bad day cannot add hours. An oversized description is never retried.
     parse_retries_per_run: int = 6
+    # Start applying from the phone: `naukri-agent telegram-listen` waits on the PC for "/apply" from YOUR chat and
+    # then starts `telegram-apply` (which still needs your Yes on every job). OFF unless set to true.
+    telegram_remote_start: bool = False
+    telegram_listener_max_command_age_seconds: int = 600  # an older "/apply" (sent while the PC was off) is ignored
+    telegram_listener_run_timeout_minutes: int = 180  # the apply run it starts is stopped after this long
+    telegram_apply_lock_file: Path = Path("./data/telegram_apply.lock")  # held while a telegram-apply run is going
     telegram_approval_timeout_minutes: int = 20  # waiting for the job's Yes/No
     telegram_answer_timeout_minutes: int = 15  # waiting for each answer / final Yes
 
