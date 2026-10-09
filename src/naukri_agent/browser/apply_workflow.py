@@ -265,8 +265,36 @@ class ApplyWorkflowSession:
         if known is not None and known.options:
             self._answer_choice(answer, known.options)
             return
-        self._page.fill(selectors.APPLY_ANSWER_INPUT, answer)
-        self._page.click(selectors.APPLY_NEXT_BUTTON)
+        self._answer_text(answer)
+
+    def _answer_text(self, answer: str) -> None:
+        """Type a free-text / number answer into the question panel and press its Save. Both selectors are
+        UNVERIFIED guesses (see selectors.py); when neither finds a box this raises ApplyAnswerError after
+        ~11s instead of waiting 30s on one guess, so the failure is quick and says what happened."""
+        last: Exception | None = None
+        for selector, timeout in ((selectors.APPLY_DRAWER_TEXT_INPUT, 8000), (selectors.APPLY_ANSWER_INPUT, 3000)):
+            try:
+                self._page.fill(selector, answer, timeout=timeout)
+                break
+            except Exception as exc:  # noqa: BLE001 - try the next guess
+                last = exc
+        else:
+            raise ApplyAnswerError("no text box for this question was found in the question panel") from last
+        try:
+            self._page.click(selectors.APPLY_DRAWER_SAVE, timeout=5000)  # the drawer's own Save (verified for choices)
+        except Exception:  # noqa: BLE001 - the older guess
+            self._page.click(selectors.APPLY_NEXT_BUTTON)
+
+    def drawer_html(self) -> str | None:
+        """The question drawer's HTML, for diagnosing a failure; None when there is no drawer or it cannot be read."""
+        try:
+            html = self._page.evaluate(
+                "(sel) => { const e = document.querySelector(sel); return e ? e.outerHTML : null; }",
+                selectors.APPLY_DRAWER,
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        return str(html)[:300_000] if html else None
 
     def _answer_choice(self, answer: str, options: list[str]) -> None:
         """Pick one radio option in the question panel, then press its Save. Waits for

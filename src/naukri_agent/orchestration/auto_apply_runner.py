@@ -106,6 +106,8 @@ def _describe_error(exc: Exception) -> str:
     only: a bare "Error" says nothing, and those messages hold a page address, never
     a credential. Every other exception stays type-only, as before."""
     name = type(exc).__name__
+    if name == "ApplyAnswerError":  # our own sentence (which option, which box), never page content or a secret
+        return f"{name}: {str(exc)[:200]}"
     if type(exc).__module__.startswith("playwright"):
         first = (str(exc).splitlines() or [""])[0].strip()[:200]
         if first:
@@ -243,6 +245,26 @@ def run_auto_apply(
                 interaction.notify(line)
         return item
 
+    def finish_applied(job: dict, attempt_id: str, notes: list[str], texts: list[str], answers: list[str]) -> None:
+        """Naukri shows the job as Applied: record it in the history, its questions and answers, and tell the phone."""
+        with session_scope(factory) as s:
+            row, _ = upsert_application_history(
+                s, job["job_id"],
+                source="agent_auto_apply_telegram" if interaction is not None else "agent_auto_apply_unattended",
+                resume_id=job.get("resume_id"),
+                resume_file_path=job.get("resume_file"),
+                resume_file_hash=job.get("resume_hash"),
+                note="Applied by naukri-agent auto-apply. "
+                     + (f"Resume {job['resume_id']} was put on the profile first. " if job.get("resume_id")
+                        else "No resume matched this role; the resume already on the profile was used. ")
+                     + "; ".join(notes),
+            )
+            history_id = row.id
+        record(job, attempt_id, "applied", "; ".join(notes), texts, answers)
+        with session_scope(factory) as s:
+            link_application_questions_to_history(s, attempt_id, history_id)
+        result.applied += 1
+
     shots = settings.inspection_output_dir / "auto_apply"
     max_attempts = max_attempts or settings.auto_apply_daily_cap * 3  # --max-jobs caps this for test runs
 
@@ -263,6 +285,9 @@ def run_auto_apply(
                     result.stopped_reason = "daily cap reached"
                     break
                 attempt_id = uuid.uuid4().hex
+                texts: list[str] = []
+                final_answers: list[str] = []
+                clicked = False  # from the Apply click on, the application may have gone through
                 if interaction is not None and job["job_id"] != pre_sent:
                     interaction.send_approval(job)  # asked while the page loads, not after
                 try:
@@ -301,6 +326,7 @@ def run_auto_apply(
                         client.open_job_page(job["url"])  # the resume check left the job page
                     client.prepare_next_application()
                     pause(settings.apply_pause_min_seconds, settings.apply_pause_max_seconds)
+                    clicked = True
                     client.click_apply()
                     questions = client.list_questions()
                     fields = client.application_question_field_count() if not questions else 0
@@ -372,25 +398,33 @@ def run_auto_apply(
                         result.stopped_reason = "an application could not be confirmed; stopped to be safe"
                         break
 
-                    with session_scope(factory) as s:
-                        row, _ = upsert_application_history(
-                            s, job["job_id"],
-                            source="agent_auto_apply_telegram" if interaction is not None else "agent_auto_apply_unattended",
-                            resume_id=job.get("resume_id"),
-                            resume_file_path=job.get("resume_file"),
-                            resume_file_hash=job.get("resume_hash"),
-                            note="Applied by naukri-agent auto-apply. "
-                                 + (f"Resume {job['resume_id']} was put on the profile first. " if job.get("resume_id")
-                                    else "No resume matched this role; the resume already on the profile was used. ")
-                                 + "; ".join(submission.notes),
-                        )
-                        history_id = row.id
-                    record(job, attempt_id, "applied", "; ".join(submission.notes), texts, final_answers)
-                    with session_scope(factory) as s:
-                        link_application_questions_to_history(s, attempt_id, history_id)
-                    result.applied += 1
+                    finish_applied(job, attempt_id, submission.notes, texts, final_answers)
                 except Exception as exc:  # noqa: BLE001 - any surprise stops the whole run
-                    record(job, attempt_id, "failed", _describe_error(exc))
+                    detail = _describe_error(exc)
+                    snapshot = getattr(client, "save_failure_snapshot", None)
+                    if snapshot is not None:  # what the page looked like, so the real cause can be read later
+                        try:
+                            shots.mkdir(parents=True, exist_ok=True)
+                            snapshot(shots / f"{attempt_id}_failure")
+                        except Exception:  # noqa: BLE001 - never hide the real error behind a diagnostics problem
+                            pass
+                    recovered = None
+                    if clicked:
+                        # The application may have gone through even though typing an answer failed (Naukri can finish
+                        # early). Ask Naukri's own page, the same check used after a normal submit; never click.
+                        try:
+                            recovered = client.confirm_application_after_answers(job["url"])
+                        except Exception:  # noqa: BLE001
+                            recovered = None
+                    if recovered is not None and recovered.submitted:
+                        finish_applied(
+                            job, attempt_id,
+                            [f"an error occurred while answering ({detail}), but Naukri's own page shows the job as Applied"]
+                            + list(recovered.notes),
+                            texts, final_answers,
+                        )
+                        continue
+                    record(job, attempt_id, "failed", detail, texts, final_answers)
                     result.stopped_reason = f"stopped after an error ({type(exc).__name__})"
                     break
     except Exception as exc:  # noqa: BLE001 - browser/login failure before or between jobs

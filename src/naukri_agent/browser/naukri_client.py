@@ -164,6 +164,21 @@ class NaukriClient(JobBoardClient):
         except Exception:  # noqa: BLE001 - a missing screenshot must never fail an application
             return False
 
+    def save_failure_snapshot(self, prefix: Any) -> None:
+        """After a failed attempt: a screenshot and the question drawer's HTML, next to each other, so what the
+        page really looked like can be read off later. Never raises."""
+        from pathlib import Path
+
+        prefix = Path(str(prefix))
+        try:
+            prefix.parent.mkdir(parents=True, exist_ok=True)
+            self.screenshot(prefix.with_name(prefix.name + ".png"))
+            html = self._get_apply_session().drawer_html()
+            if html:
+                prefix.with_name(prefix.name + ".html").write_text(html, encoding="utf-8")
+        except Exception:  # noqa: BLE001 - diagnostics must never hide the real error
+            pass
+
     def confirm_application_after_answers(self, job_url: str) -> ApplySubmissionResult:
         return self._get_apply_session().confirm_applied_after_save(job_url)
 

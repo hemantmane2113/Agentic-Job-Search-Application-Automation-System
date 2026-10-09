@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from naukri_agent.browser import selectors
-from naukri_agent.browser.apply_workflow import ApplyWorkflowSession, _parse_questionnaire
+from naukri_agent.browser.apply_workflow import ApplyAnswerError, ApplyWorkflowSession, _parse_questionnaire
 from naukri_agent.browser.models import ApplyQuestionPrompt
 
 from .browser_fakes import FakeElement, FakePage
@@ -80,14 +82,49 @@ def test_list_questions_ignores_unrelated_responses():
     assert session.list_questions() == []
 
 
-def test_submit_answer_fills_and_advances():
+def test_submit_answer_fills_the_drawers_text_box_and_presses_its_save():
     page = FakePage()
-    page.set_element(selectors.APPLY_ANSWER_INPUT, FakeElement())
-    page.set_element(selectors.APPLY_NEXT_BUTTON, FakeElement())
     session = ApplyWorkflowSession(page)
     session.submit_answer("q1", "30 days")
-    assert page.filled[selectors.APPLY_ANSWER_INPUT] == "30 days"
-    assert selectors.APPLY_NEXT_BUTTON in page.clicked
+    assert page.filled == {selectors.APPLY_DRAWER_TEXT_INPUT: "30 days"}
+    assert page.clicked == [selectors.APPLY_DRAWER_SAVE]
+
+
+def test_a_text_answer_falls_back_to_the_older_selector_when_the_first_finds_nothing():
+    class Page(FakePage):
+        def fill(self, selector, value, **kw):
+            if selector == selectors.APPLY_DRAWER_TEXT_INPUT:
+                raise TimeoutError("no such element")
+            super().fill(selector, value, **kw)
+
+    page = Page()
+    ApplyWorkflowSession(page).submit_answer("q1", "30 days")
+    assert page.filled == {selectors.APPLY_ANSWER_INPUT: "30 days"}
+
+
+def test_a_text_answer_with_no_box_anywhere_fails_clearly_and_clicks_nothing():
+    class Page(FakePage):
+        def fill(self, selector, value, **kw):
+            raise TimeoutError("Page.fill: Timeout")
+
+    page = Page()
+    with pytest.raises(ApplyAnswerError, match="no text box"):
+        ApplyWorkflowSession(page).submit_answer("q1", "30 days")
+    assert page.clicked == []
+
+
+def test_the_drawer_html_is_read_for_diagnostics_and_never_raises():
+    class Page(FakePage):
+        def evaluate(self, script, arg=None):
+            return "<div class='chatbot_Drawer'>q</div>"
+
+    assert ApplyWorkflowSession(Page()).drawer_html() == "<div class='chatbot_Drawer'>q</div>"
+
+    class Broken(FakePage):
+        def evaluate(self, script, arg=None):
+            raise RuntimeError("page closed")
+
+    assert ApplyWorkflowSession(Broken()).drawer_html() is None
 
 
 def test_skip_question_clicks_only_the_skip_control():

@@ -19,7 +19,7 @@ from naukri_agent.database.models import (
     JobExtraction,
     JobMatch,
 )
-from naukri_agent.database.repositories import upsert_application_history, upsert_candidate
+from naukri_agent.database.repositories import application_status_for_job, upsert_application_history, upsert_candidate
 from naukri_agent.matching.models import ExperienceProfile, MatchDecision
 from naukri_agent.orchestration.auto_apply_runner import check_gates, run_auto_apply
 from naukri_agent.resume.models import MasterResume
@@ -326,11 +326,43 @@ def test_unconfirmed_submit_stops_the_run_and_is_not_recorded_as_applied(tmp_pat
 def test_any_exception_stops_the_run_and_the_summary_flags_it(tmp_path):
     c = cfg(tmp_path)
     factory, urls = seed(c, [("e", "040926001401", 95.0, {}), ("g", "040926001402", 90.0, {})])
-    fake = FakeClient({urls["e"]: {"raise_on_click": True}, urls["g"]: {}})
+    fake = FakeClient({urls["e"]: {"raise_on_click": True, "submitted": False}, urls["g"]: {}})  # Naukri does not show Applied
     r = run(c, factory, fake)
     assert r.outcomes[0].outcome == "failed" and fake.opened == [urls["e"]]
     body = list((tmp_path / "emails").glob("digest_*.txt"))[0].read_text(encoding="utf-8")
     assert "PROBLEMS" in body
+
+
+def test_an_error_after_the_click_is_not_reported_as_failed_when_naukri_shows_the_job_as_applied(tmp_path):
+    """Live 2026-10-09 (Recrosoft): an answer could not be entered, yet the application had gone through."""
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("e", "040926001451", 95.0, {}), ("g", "040926001452", 90.0, {})])
+    fake = FakeClient({urls["e"]: {"raise_on_click": True}, urls["g"]: {}})  # Naukri's page says Applied
+    r = run(c, factory, fake)
+    first = r.outcomes[0]
+    assert first.outcome == "applied" and "shows the job as Applied" in first.detail and "RuntimeError" in first.detail
+    assert r.applied == 2 and fake.opened == [urls["e"], urls["g"]]  # the run carried on to the next job
+    with session_scope(factory) as s:
+        assert application_status_for_job(s, first.job_id).name == "APPLIED"
+
+
+def test_a_failure_saves_a_snapshot_and_keeps_the_questions_that_were_asked(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("e", "040926001461", 95.0, {})])
+    snaps = []
+    fake = FakeClient({urls["e"]: {"raise_on_click": True, "submitted": False}})
+    fake.save_failure_snapshot = lambda prefix: snaps.append(str(prefix))
+    r = run(c, factory, fake)
+    assert r.outcomes[0].outcome == "failed" and len(snaps) == 1 and snaps[0].endswith("_failure")
+
+
+def test_an_error_before_the_click_never_asks_naukri_whether_it_was_applied(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("e", "040926001471", 95.0, {})])
+    fake = FakeClient({urls["e"]: {}})
+    fake.read_employment_type = lambda: (_ for _ in ()).throw(RuntimeError("page died"))
+    r = run(c, factory, fake)
+    assert r.outcomes[0].outcome == "failed" and fake.confirmed_urls == []
 
 
 def test_a_job_that_lost_its_apply_button_is_skipped_without_clicking(tmp_path):

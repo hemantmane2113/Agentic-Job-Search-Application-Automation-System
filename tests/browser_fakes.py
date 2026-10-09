@@ -377,7 +377,7 @@ class FakePage:
             raise self.wait_for_selector_error
         raise TimeoutError(f"wait_for_selector({selector!r}) timed out")
 
-    def fill(self, selector: str, value: str) -> None:
+    def fill(self, selector: str, value: str, **_kwargs: Any) -> None:
         self._check_conn()
         if self.fill_error is not None:
             raise self.fill_error
