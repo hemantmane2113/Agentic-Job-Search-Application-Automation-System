@@ -162,7 +162,8 @@ def test_a_no_reply_job_is_offered_again_the_next_day_but_a_declined_one_is_not(
     c = cfg(tmp_path)
     factory, urls = seed(c, [("a", "040926002801", 90.0, {}), ("b", "040926002802", 85.0, {})])
     go(c, factory, FakeClient({u: {} for u in urls.values()}), FakeHuman(approvals=[False, None]))
+    real_now = datetime.datetime.now(datetime.UTC)  # the attempts above are stamped with the real clock, so measure from it
     with session_scope(factory) as s:
-        today = auto_apply_job_ids_to_skip(s, NOW)
-        tomorrow = auto_apply_job_ids_to_skip(s, NOW + datetime.timedelta(days=2))
+        today = auto_apply_job_ids_to_skip(s, real_now)
+        tomorrow = auto_apply_job_ids_to_skip(s, real_now + datetime.timedelta(days=2))
     assert len(today) == 2 and len(tomorrow) == 1  # only the declined one stays blocked

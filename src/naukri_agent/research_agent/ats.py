@@ -48,11 +48,23 @@ _NOTES = {
 }
 
 
+# A careers page that shows next to no text to an automated reader. Seen live on 2026-10-09 (LG Soft India on
+# Darwinbox): the careers home came back as the company name and nothing else, and its job API refuses anything
+# that is not a normal browser, so the job list, and so each job's own address, cannot be read automatically.
+_MIN_VISIBLE_CHARS = 80
+_STRIP = re.compile(r"(?is)<(script|style|noscript|head)\b.*?</\1>|<!--.*?-->|<[^>]+>")
+
+
+def visible_text_length(html: str) -> int:
+    return len(re.sub(r"\s+", " ", _STRIP.sub(" ", html or "")).strip())
+
+
 @dataclass
 class ApplyMethod:
     name: str
     level: str  # easy | medium | account | email | board | own_form | unknown
     note: str
+    thin_page: bool = False  # the pages read showed almost no text: the jobs on them could not be seen
 
     def line(self) -> str:
         return f"{self.name}: {self.note}" if self.name else self.note
@@ -77,12 +89,14 @@ def detect_apply_method(urls: list[str], fetch_raw: Callable[[str], tuple[str, s
     """Look at up to `max_pages` of the given addresses. None when none of them could be read."""
     found: list[tuple[str, str]] = []
     read = 0
+    thin = 0
     for url in list(dict.fromkeys(u for u in urls if u))[:max_pages]:
         try:
             final, html = fetch_raw(url)
         except Exception:  # noqa: BLE001 - an unreadable page just contributes nothing
             continue
         read += 1
+        thin += visible_text_length(html) < _MIN_VISIBLE_CHARS
         blob = f"{final} {html}"
         for name, rx, level in _SYSTEMS:
             if re.search(rx, blob, re.I):
@@ -93,4 +107,8 @@ def detect_apply_method(urls: list[str], fetch_raw: Callable[[str], tuple[str, s
             found.append(("Email your CV", "email"))
         if _JOB_BOARD.search(blob):
             found.append(("LinkedIn/Indeed listing", "board"))
-    return _best(found) if read else None
+    if not read:
+        return None
+    method = _best(found)
+    method.thin_page = thin == read
+    return method

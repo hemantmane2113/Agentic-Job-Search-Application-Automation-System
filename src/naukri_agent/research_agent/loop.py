@@ -121,6 +121,11 @@ def finalize_report(report: ResearchReport, box: ToolBox) -> ResearchReport:
             "careers_url": careers,
             "sources": list(dict.fromkeys(box.fetched)),
             "notes": notes,
+            # worked out by code from the careers page afterwards (research_agent/ats.py); never the model's words
+            "apply_method": None,
+            "apply_note": None,
+            "find_by_title": False,
+            "direct_link": None,
         }
     )
 

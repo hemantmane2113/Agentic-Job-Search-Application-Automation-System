@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from naukri_agent.browser.pacing import pause
 from naukri_agent.config import Settings
 from naukri_agent.recommendations.employment import is_excluded
 from naukri_agent.research_agent.loop import run_agent
@@ -110,12 +111,16 @@ def select_jobs(session: Any, settings: Settings, now: datetime.datetime, *, job
 
 def format_report(job: dict, report: ResearchReport) -> str:
     lines = [f"Research: {job['title']} - {job['company']}", "", report.company_summary, ""]
+    if report.direct_link:
+        lines.append(f"Direct apply link: {report.direct_link}")
     lines.append(f"Careers page: {report.careers_url or 'not found'}")
     if report.apply_candidates:
         lines.append("Possible apply pages:")
         for i, c in enumerate(report.apply_candidates, 1):
             lines.append(f"  {i}. {c.url} ({c.confidence})" + (f" - {c.why}" if c.why else ""))
     lines.append(f"Lists this role: {report.lists_this_role}")
+    if report.find_by_title and not report.direct_link:  # the hint is only for when the direct link could not be read
+        lines.append(f"Finding the job: the page shows no jobs to automated tools; search it for \"{job['title']}\".")
     if report.apply_note:
         lines.append(f"How you'll apply: {report.apply_method + ': ' if report.apply_method else ''}{report.apply_note}")
     if report.differences:
@@ -129,14 +134,36 @@ def format_report(job: dict, report: ResearchReport) -> str:
     return "\n".join(lines)[:3500]
 
 
+def _with_direct_link(report: ResearchReport, reader: Any, job: dict, settings: Settings) -> ResearchReport:
+    """Add the employer's own job address, read from the job data Naukri's page loads (nothing is pressed). Whatever
+    goes wrong is reduced to a note: a missing link must never lose the rest of the research."""
+    try:
+        pause(settings.browse_pause_min_seconds, settings.browse_pause_max_seconds)
+        link = reader.direct_apply_link(job["url"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not read the direct link: %s", type(exc).__name__)
+        return report.model_copy(update={"notes": [*report.notes, f"direct link not read ({type(exc).__name__})"]})
+    notes = list(report.notes)
+    if link.url is None:
+        notes.append(f"direct link not read: {link.note}")
+    return report.model_copy(update={"direct_link": link.url, "notes": notes})
+
+
 def format_email_entry(index: int, job: dict, report: ResearchReport) -> str:
     """One job in the research email: everything needed to decide and to act, nothing else."""
     where = f" ({job['location']})" if job.get("location") else ""
     lines = [f"{index}. {job['title']} - {job['company']}{where}"]
+    if report.direct_link:
+        lines.append(f"   Direct apply link: {report.direct_link}")
     lines.append(f"   Careers page: {report.careers_url or 'not found'}")
     lines.append(f"   Role listed there: {report.lists_this_role}")
     if report.apply_note:
         lines.append(f"   How you'll apply: {report.apply_method + ': ' if report.apply_method else ''}{report.apply_note}")
+    if report.find_by_title and not report.direct_link:  # the hint is only for when the direct link could not be read
+        lines.append(
+            "   Finding the job: that page shows no jobs to automated tools (it needs a normal browser), so the direct "
+            f"job link could not be read. Open it and search for \"{job['title']}\"" + (f" ({job['location']})" if job.get("location") else "") + "."
+        )
     for c in report.apply_candidates:
         lines.append(f"   Possible apply page: {c.url} ({c.confidence})" + (f" - {c.why}" if c.why else ""))
     if report.differences:
@@ -175,7 +202,7 @@ class NaukriReader:
         self._browser: Any = None
         self._client: Any = None
 
-    def read(self, job_url: str) -> dict:
+    def _open(self) -> Any:
         if self._client is None:
             from naukri_agent.browser.browser_manager import BrowserManager
             from naukri_agent.browser.naukri_client import NaukriClient
@@ -184,7 +211,13 @@ class NaukriReader:
             self._browser.launch()
             self._client = NaukriClient(self._browser.page, self._settings)
             self._client.login()
-        return self._client.read_company_page(job_url)
+        return self._client
+
+    def read(self, job_url: str) -> dict:
+        return self._open().read_company_page(job_url)
+
+    def direct_apply_link(self, job_url: str) -> Any:
+        return self._open().read_direct_apply_link(job_url)
 
     def close(self) -> None:
         if self._browser is not None:
@@ -270,7 +303,11 @@ def run_research(
                     [res.report.careers_url] + [c.url for c in res.report.apply_candidates], raw_fn
                 )
                 if method is not None:
-                    res.report = res.report.model_copy(update={"apply_method": method.name or None, "apply_note": method.note})
+                    res.report = res.report.model_copy(
+                        update={"apply_method": method.name or None, "apply_note": method.note, "find_by_title": method.thin_page}
+                    )
+            if ok and settings.research_read_direct_link and hasattr(reader, "direct_apply_link"):
+                res.report = _with_direct_link(res.report, reader, job, settings)
             outcome = ResearchOutcome(
                 job_id=job["job_id"], title=job["title"], company=job["company"],
                 status="ok" if ok else "failed", error=res.error, steps=res.steps,

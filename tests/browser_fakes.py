@@ -141,6 +141,7 @@ class FakeResponse:
         status_error: Exception | None = None,
     ) -> None:
         self.request = FakeRequest(method, url)
+        self.url = url  # a real Playwright Response has one
         self._status = status
         self._status_error = status_error
         self._headers = headers or {}

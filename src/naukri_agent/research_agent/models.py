@@ -41,6 +41,12 @@ class ResearchReport(BaseModel):
     # code from the careers page itself, never by the model.
     apply_method: str | None = None
     apply_note: str | None = None
+    # The careers page showed almost no text to an automated reader, so the job's own address could not be found:
+    # the email then tells you to search that page for the job title.
+    find_by_title: bool = False
+    # The employer's own address for this job, read by code from the job data Naukri's page loads
+    # (browser/company_link.py). Never written by the model.
+    direct_link: str | None = None
     sources: list[str] = Field(default_factory=list)  # pages the agent really fetched
     notes: list[str] = Field(default_factory=list)  # what code changed or could not check
 

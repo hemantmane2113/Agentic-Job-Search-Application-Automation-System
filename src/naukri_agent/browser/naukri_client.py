@@ -70,6 +70,13 @@ class NaukriClient(JobBoardClient):
         """Read-only: the Naukri company page for a job (rating, reviews, locations, description)."""
         return _jobs.read_company_page(self._page, job_url)
 
+    def read_direct_apply_link(self, job_url: str) -> Any:
+        """Read-only: the employer's own address for a company-site job, taken from the job data Naukri's page
+        loads. Presses nothing (see browser/company_link.py)."""
+        from naukri_agent.browser.company_link import read_direct_apply_link
+
+        return read_direct_apply_link(self._page, job_url)
+
     def fetch_job_detail(self, url: str) -> JobDetail:
         """Read-only: open a job's public listing page and extract its
         title/company/location/experience/salary/posted/description. Never

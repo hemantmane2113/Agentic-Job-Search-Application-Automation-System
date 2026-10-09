@@ -210,6 +210,10 @@ class Settings(BaseSettings):
     research_max_searches: int = 3  # web searches per job
     research_page_max_bytes: int = 300_000  # larger pages are cut off
     research_compact_history: bool = False  # shorten OLDER tool results each turn; tested: no consistent gain, so OFF
+    # Put the employer's direct job address in the research email. It is read from the job data Naukri's own page
+    # loads (browser/company_link.py); nothing is pressed (pressing "Apply on company site" would mark the job
+    # Applied on your account) and no request is sent beyond opening the job page.
+    research_read_direct_link: bool = True
     research_skip_days: int = 7  # a job researched within this many days is not redone
 
     # --- Naukri credentials (Phase 7) ---

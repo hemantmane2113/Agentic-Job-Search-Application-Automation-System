@@ -276,3 +276,49 @@ def test_waiting_survives_the_database_being_locked_when_it_first_tries_to_open_
     clock = {"now": datetime.datetime(2026, 10, 9, 8, 0, tzinfo=datetime.UTC)}
     ready = wait_for_digest(c, poll_seconds=60, sleep=lambda s: clock.update(now=clock["now"] + datetime.timedelta(seconds=s)), clock=lambda: clock["now"])
     assert ready is True and len(attempts) == 2
+
+
+# --- a careers page that shows no jobs to an automated reader -------------------------------------------------------------
+
+STUB = "<!doctype html><html><head><title>LG Soft India Private Limited</title></head><body>LG Soft India Private Limited - </body></html>"
+FULL_PAGE = "<html><body><h1>Careers</h1><p>" + "We are hiring engineers across many teams and locations. " * 5 + "</p></body></html>"
+
+
+def test_a_careers_page_with_almost_no_text_is_flagged_as_unreadable():
+    """Live 2026-10-09: the Darwinbox careers home came back as the company name and nothing else."""
+    assert detect_apply_method([CAREERS], raw({CAREERS: STUB})).thin_page is True
+    assert detect_apply_method([CAREERS], raw({CAREERS: FULL_PAGE})).thin_page is False
+
+
+def test_scripts_and_styles_do_not_count_as_readable_text():
+    html = "<html><head><style>p{}</style></head><body><script>" + "var x=1;" * 100 + "</script></body></html>"
+    assert detect_apply_method([CAREERS], raw({CAREERS: html})).thin_page is True
+
+
+def test_one_readable_page_among_several_means_the_jobs_could_be_seen():
+    other = "https://acme.example/jobs"
+    m = detect_apply_method([CAREERS, other], raw({CAREERS: STUB, other: FULL_PAGE}))
+    assert m.thin_page is False
+
+
+def test_the_email_tells_you_what_to_search_for_when_the_jobs_could_not_be_seen():
+    from naukri_agent.research_agent.models import ResearchReport
+    from naukri_agent.research_agent.runner import format_email_entry
+
+    job = {"title": "AI Engineer (HS_Kitchen)", "company": "LG Soft India", "location": "Bengaluru", "url": "https://naukri.example/j"}
+    report = ResearchReport(company_summary="s", careers_url=CAREERS, apply_method="Darwinbox", apply_note="n", find_by_title=True)
+    text = format_email_entry(1, job, report)
+    assert 'search for "AI Engineer (HS_Kitchen)" (Bengaluru)' in text and "direct job link could not be read" in text
+    assert "Finding the job" not in format_email_entry(1, job, report.model_copy(update={"find_by_title": False}))
+
+
+def test_the_model_cannot_write_the_how_to_apply_fields():
+    from naukri_agent.research_agent.loop import finalize_report
+    from naukri_agent.research_agent.models import ResearchReport
+    from naukri_agent.research_agent.tools import ToolBox
+
+    box = ToolBox.__new__(ToolBox)
+    box.seen, box.fetched = set(), []
+    claimed = ResearchReport(company_summary="s", apply_method="Greenhouse", apply_note="easy", find_by_title=True)
+    out = finalize_report(claimed, box)
+    assert (out.apply_method, out.apply_note, out.find_by_title) == (None, None, False)
