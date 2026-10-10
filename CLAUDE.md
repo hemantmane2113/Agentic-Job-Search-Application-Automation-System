@@ -1,133 +1,98 @@
-# naukri-agent — project context for Claude Code
+# naukri-agent: project context for Claude Code
 
-This file is read automatically by Claude Code at the start of every
-session. It exists so work can continue here with full context,
-picking up exactly where a prior chat-based session (claude.ai) left
-off — read this before making any changes.
+Read automatically at the start of every session. It states what the project is, the rules that must never be broken, how the
+code is laid out, and how to work with this user. For the full picture see `docs/PROJECT_OVERVIEW.md`; for setup, `README.md`.
+Detailed dated history of every real-Naukri fix lives in git history, the module docstrings and the VERIFIED/UNVERIFIED notes in
+`src/naukri_agent/browser/selectors.py`, not here.
 
 ## What this is
 
-An agentic job-search assistant for Naukri.com: discovers jobs, scores
-them deterministically against a candidate profile, selects an
-existing (never generated) resume file per application, and — once
-Stage 2 is built — will refresh/apply on Naukri with a human approving
-every write action. Built from a detailed master-prompt spec,
-developed in strict incremental phases with explicit approval required
-between phases.
+A personal job-search assistant for Naukri.com, run on the user's Windows PC. Every day it finds fresh jobs, reads them, scores them
+with plain code against a candidate profile and resumes, emails a digest, and tells the phone about jobs it can apply to. It applies
+to **Naukri Apply jobs only after the user taps Yes on Telegram, one job at a time**. For company-website jobs it gives the direct
+link, researches the company with a read-only AI agent, and asks on Telegram whether the user applied. A weekly Excel report goes
+out every Sunday at 22:00. The user starts applying from a phone with `/apply`.
 
-## Ground rules that must never be violated
+## Ground rules that must never be broken
 
-- **Never bypass CAPTCHA, MFA, rate limits, or anti-bot protections.**
-  Detect and pause for human intervention; never attempt to solve.
-- **`DRY_RUN=true` stays the default.** No code path should submit an
-  application without this being deliberately overridden.
-- **`prepare_application()` on `NaukriClient` stays `NotImplementedError`**
-  until Stage 2 is explicitly approved (see Phase status below).
-- **No resume generation.** `ResumeRegistry`/`ResumeSelector` only
-  select among the user's own, pre-existing resume files
-  (`resumes/*.pdf`/`.docx`). Nothing writes or rewords resume content.
-  MasterResume is factual record + matching input only.
-- **LLM never makes the final accept/reject/apply decision.**
-  Deterministic Python (`matching/scorer.py`) owns that; the LLM
-  (Phase 5's `JobParser`) only extracts/structures data from job
-  postings, treated as untrusted text (prompt-injection defenses in
-  `jobs/parser.py`'s system prompt + Pydantic whitelist schema).
-- **`browser/selectors.py` is the ONLY file allowed to contain a raw
-  CSS/XPath selector.** Every other module in `browser/` refers to a
-  selector by name from there. Most selectors are still `UNVERIFIED`
-  placeholders — see that file's docstring for which six are
-  `VERIFIED` (confirmed against a real Stage 1 inspection run) and
-  which still need verification via `naukri-agent inspect`.
-- **Skill normalization is a small, explicit alias table only**
-  (`matching/skill_normalizer.py`) — never capability inference (e.g.
-  "Python" must never imply "Django").
+- **A human approves every application.** Nothing is applied without the user's Yes tap on that job; silence, No or a timeout means
+  no. `/apply` only starts the run that asks. The daily run, discovery, the scheduler, the research agent, the phone listener and the
+  follow-up never import apply code (structural tests enforce it).
+- **Never bypass CAPTCHA, MFA, rate limits or anti-bot protection.** Detect and pause for a human. No stealth, no evasion. A site that
+  blocks a plain visitor is left alone (a LinkedIn browser, a Cloudflare-protected job API).
+- **Never press "Apply on company site".** Naukri marks the job Applied on the account when it is pressed. The employer's address is
+  read from the job data the page already loads (`browser/company_link.py`), passively.
+- **`DRY_RUN=true` and `AUTO_APPLY=false` stay the defaults in `.env`.** `telegram-apply` needs both flipped, for that one process
+  only; the phone listener sets them for the child process it starts, never for itself.
+- **The LLM never decides.** Scoring, ranking, eligibility, statuses and the daily plan are deterministic code. The parser only
+  extracts; the research agent only reads. Code, not a model, writes the research sources, the apply route and the direct link.
+- **The database is the truth.** `ApplicationHistory` is the only authoritative record of what the user did. Excel files are copies
+  rebuilt from the database. Never infer an application, never ask a model.
+- **No resume generation.** `resume/` selects among the user's own files only.
+- **`browser/selectors.py` is the only file with a raw CSS/XPath selector.** Mark each VERIFIED (with the date and source) or
+  UNVERIFIED. Do not present a guess as confirmed.
+- **Skill normalisation is a small alias table, never capability inference** ("Python" never implies "Django"). The LLM-based
+  Tier 3 semantic matcher stays disabled.
+- **Secrets stay out of everything.** Never paste or print keys or passwords. `.env`, `config/*.yaml` (not the `*.example` files),
+  `resumes/`, `data/`, `logs/`, `out/`, `inspection_output/` are git-ignored. Errors report only the exception type.
+- **Real email only with `EMAIL_SENDER=smtp`.** It fails loudly if any SMTP setting is missing.
+- **Back up `data/naukri_agent.db` before any manual change to it** (`cp data/naukri_agent.db data/naukri_agent.db.bakNN-HHMM`).
 
-## Architecture quick reference
+## Layout
 
 ```
-candidate/    CandidateProfile (matching prefs) — YAML-loaded
-resume/       MasterResume (factual record) + ResumeRegistry/Selector
-jobs/         Job (raw) / JobExtraction (LLM-derived) / JobParser
-matching/     Deterministic JobScorer (skills/experience/salary/role/location/education)
-llm/          LLMProvider abstraction: OpenAIProvider/GroqProvider/OllamaProvider,
-              provider+model configured independently, per-task model override supported
-browser/      Playwright Naukri automation — Stage 1 (read-only) is done,
-              Stage 2 (write ops) is NOT started
-database/     SQLAlchemy models + repositories (upsert-pattern throughout)
-cli/          `naukri-agent <command>` — see `doctor`, `inspect`
+src/naukri_agent/
+  config.py  power.py            settings; keep Windows awake during long jobs
+  candidate/ resume/ jobs/       profile and resumes; job models and the LLM parser; skill evidence
+  matching/                      deterministic scorer: skills 35, experience 20, role 15, salary 11, location 7, education 5,
+                                 posted-recently 7. ACCEPT >= 80, REVIEW >= 70
+  llm/                           Ollama (local, parsing), Groq (research), OpenAI
+  browser/                       Playwright: login, search, job pages, profile upload, the apply panel (apply_workflow.py),
+                                 company_link.py, apply_inspection.py (the default-deny network guard still used when applying)
+  database/                      SQLAlchemy models and repositories (SQLite; new nullable columns/tables are added at startup)
+  orchestration/                 pipeline.py (daily run), discovery.py, auto_apply_runner.py, telegram_listener.py, followup.py,
+                                 profile_refresh.py, watchdog.py, apply_lock.py
+  recommendations/               build_digest (Parts 1-3), apply_ready.py, employment.py
+  research_agent/                read-only company-site researcher and ATS detection
+  notifications/ reporting/      email (file/console/SMTP with attachments), Telegram, Excel mirror, weekly report
+  agents/  scheduler/  legacy/   profile answers (no AI); optional in-process scheduler; older commands kept but unused
+  cli/                           `naukri-agent <command>`
+tests/                           94+ files; tests/manual/ needs a real Naukri account; tests/browser_fakes.py fakes Playwright
+docs/                            PROJECT_OVERVIEW.md and the architecture/workflow HTML pages
 ```
 
-Full narrative design rationale for each phase is in `README.md`'s
-"Development phases" table and inline module docstrings — those
-docstrings are written to explain *why*, not just *what*, so read them
-before changing a module's behavior.
+## What runs when (Windows Task Scheduler, user signed in)
 
-## Phase status (as of this handoff)
+09:45 profile refresh · 10:00 `run-daily` · 10:05 `research-jobs --wait-for-digest` · 10:30 and 15:00 `watchdog` · Sunday 22:00
+`weekly-report` · at logon `telegram-listen` (phone control, always on). The 20:00 "did you apply?" question is sent by the listener.
 
-| Phase | Status |
-|---|---|
-| 1 — scaffolding | ✅ approved |
-| 2 — CandidateProfile + MasterResume | ✅ approved |
-| 3 — Job raw/derived separation, dedup | ✅ approved |
-| 4 — deterministic JobScorer | ✅ approved |
-| 5 — LLM JobParser + provider abstraction | ✅ approved |
-| 6 (revised) — ResumeRegistry + selection | ✅ approved |
-| 7 Stage 1 — read-only Naukri inspection | ✅ approved, including a login-state bugfix (see below) |
-| 7 Stage 2 — write operations (resume refresh, apply prep) | ⛔ NOT started — needs explicit user approval before any code |
+## Things to know before changing anything
 
-### Stage 1 history worth knowing
+- **The apply panel is the fragile part.** Naukri's chat widget varies: question types (radio `label.ssrc__label`, checkbox
+  `label.mcc__label`, free text in the drawer), order, and skipped questions. After any apply failure read
+  `inspection_output/auto_apply/<attempt>_failure.{png,html}` before guessing. Any new type should produce a clean stop with a snapshot.
+- **Do not change `browser/apply_inspection.py`** except to fix a real defect: its `MutatingRequestBlocker` is the safety net for
+  applying. Its inspection tooling (`inspect-apply`) is frozen.
+- **Naukri's login page can flash its form before redirecting a logged-in session.** `login()` waits for a late redirect; keep that.
+- **Telegram's connection drops now and then.** Waiting for a tap must survive a dropped connection (`TelegramChannel._wait`).
+- **Statuses:** `ApplicationStatus` has NOT_APPLYING and IGNORED besides the original ones; both are excluded from digests by default.
+- **Windows specifics:** use PowerShell for Task Scheduler; the shell tool is Git Bash. Avoid `rm -rf` with shell variables.
 
-Two real-Naukri inspection runs happened, and two rounds of fixes came
-out of them:
+## Testing
 
-1. First real run found 6 selectors were wrong (guessed, never
-   verified) — fixed in `selectors.py`, each now marked `VERIFIED`
-   with the date and source capture file cited in a comment.
-2. Second real run hit a genuine bug: `login()` unconditionally tried
-   to fill the login form even when the persistent browser session
-   was already authenticated (Naukri's login URL auto-redirects an
-   authenticated session, and the code didn't check for that first) —
-   this produced a raw, unhandled `Page.fill` Playwright timeout.
-   Fixed with: an `is_authenticated()` guard checked both before and
-   after `goto(LOGIN_URL)`, a settle-then-recheck step after manual
-   CAPTCHA/MFA completion, and a narrow
-   `except playwright.sync_api.Error` boundary in
-   `inspection.run_inspection()` that converts Playwright interaction
-   failures into the same structured JSON report — deliberately
-   narrow, so a genuine programming bug (`TypeError`, etc.) still
-   propagates instead of being swallowed.
+Three tiers: unit; mocked-browser (`test_browser_*.py`, no real browser); manual (`pytest -m manual`, excluded by default). Run
+`pytest` before calling a change done. Currently **1599 passed, 3 deselected**. A fix for a live bug gets a test built from the
+real shape that failed (see `tests/test_choice_questions.py` for the Indium panel).
 
-**Not yet captured:** the actual job-listing / apply-workflow page.
-Every real run so far has been read-only Stage 1 (login → profile →
-search → one listing). `APPLY_BUTTON` and `RESUME_SELECTION_CONTROLS`
-in `selectors.py` are still `UNVERIFIED` placeholders. Before Stage 2
-can be designed for real, a Stage 1 `naukri-agent inspect` run needs
-to actually reach and capture a real job listing page.
+## Working style the user expects
 
-## Testing conventions
-
-Three tiers, kept strictly separate — see `tests/manual/README.md`:
-- Unit tests — pure logic, no I/O.
-- Mocked browser tests (`test_browser_*.py`) — fake `Page`/`BrowserManager`
-  objects (`tests/browser_fakes.py`), zero real network/browser dependency.
-- Manual/real-integration tests (`tests/manual/`) — require a real
-  Naukri account + installed Playwright browsers, marked
-  `@pytest.mark.manual`, excluded by default
-  (`addopts = "-m 'not manual'"` in `pyproject.toml`). Run explicitly
-  with `pytest -m manual`.
-
-Run `pytest` for the full non-manual suite before considering any
-change done. As of this handoff: 245 passed, 3 deselected.
-
-## Working style expected on this project
-
-- Explain architecture and tradeoffs *before* implementing each
-  phase/change, not after.
-- Explicit user approval is required before moving to a new phase —
-  don't assume "looks done" means "go ahead."
-- When something can be verified against the real site vs. guessed,
-  say so plainly — don't present an unverified selector or assumption
-  as confirmed.
-- Prefer the smallest correct fix over broad rewrites, especially
-  around `browser/` — the whole point of `selectors.py` isolation is
-  that a site-behavior fix should touch as little else as possible.
+- Explain in **plain, simple English**; give a recommendation, not a survey of options. Tables for comparisons are welcome.
+- **Explain the design and trade-offs before building anything that changes behaviour**, and get a clear yes. Small bug fixes the
+  user has reported can be fixed directly, then explained.
+- **Commit and push only when the user says so** ("commit and push it"). Commit messages end with the `Co-Authored-By` line the
+  session specifies. Never skip hooks or force-push.
+- **Say plainly what is verified against the real site and what is a guess.** Report failures as failures.
+- Do not click, apply, press or change anything on the user's Naukri account to test a theory; read-only page checks are fine.
+- Prefer the smallest correct fix. Keep the tests green and say how many pass.
+- When the user pastes an email or a screenshot, read it carefully: their real-world observations have repeatedly been right
+  (an "Applied" marker that appeared, a question that was skipped, a login that flashed).

@@ -50,6 +50,9 @@ class JobCreate(BaseModel):
     url: str
     posted_date_text: str | None = None
     source: str = "naukri"
+    apply_type: str | None = None  # "native" | "company_site" | "none"
+    employment_type_text: str | None = None  # Naukri's own Employment Type line
+    apply_redirect_url: str | None = None  # the employer's own address for a company-site job
 
 
 class JobExtractionCreate(BaseModel):

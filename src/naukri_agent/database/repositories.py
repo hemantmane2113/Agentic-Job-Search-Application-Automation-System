@@ -9,19 +9,39 @@ operations.
 from __future__ import annotations
 
 import datetime
+import logging
 
 from sqlalchemy.orm import Session
 
 from naukri_agent.candidate.models import CandidateProfile
-from naukri_agent.database.models import Candidate, Job, JobExtraction, JobMatch, ResumeSelection
+from naukri_agent.database.models import (
+    ApplicationEvent,
+    ApplicationHistory,
+    ApplicationQuestion,
+    ApplicationStatus,
+    Candidate,
+    FollowupPrompt,
+    Job,
+    JobExtraction,
+    JobExtractionSkillEvidence,
+    JobMatch,
+    JobRawSkillEvidence,
+    JobRecommendation,
+    ResumeSelection,
+    RunEvent,
+    RunEventStatus,
+)
 from naukri_agent.jobs.models import (
     JobCreate,
     JobExtractionCreate,
     compute_content_fingerprint,
     extract_external_id,
 )
-from naukri_agent.matching.models import MatchResult
+from naukri_agent.matching.models import MatchDecision, MatchResult
+from naukri_agent.matching.skill_normalizer import normalize_skill
 from naukri_agent.resume.selector import ResumeSelectionOutcome
+
+logger = logging.getLogger(__name__)
 
 
 def upsert_candidate(session: Session, profile: CandidateProfile) -> Candidate:
@@ -77,6 +97,11 @@ def upsert_job(
     description, different URL/external_id), repost_of_job_id is set
     to point at the earliest such job — a likely repost, tracked
     without merging the two listings' independent histories.
+
+    On a re-sighting, _repair_stale_repost_links() additionally BREAKS
+    (never creates) any repost link whose justifying condition —
+    identical content — no longer holds now that a later fetch has
+    proven the content distinct. See that helper.
     """
     now = datetime.datetime.now(datetime.UTC)
     fingerprint = compute_content_fingerprint(job.title, job.company, job.description)
@@ -96,11 +121,25 @@ def upsert_job(
         existing.experience_text = job.experience_text
         existing.description = job.description
         existing.posted_date_text = job.posted_date_text
+        if job.apply_type is not None:
+            existing.apply_type = job.apply_type
+        if job.employment_type_text is not None:
+            existing.employment_type_text = job.employment_type_text
+        if job.apply_redirect_url is not None:
+            existing.apply_redirect_url = job.apply_redirect_url
         existing.content_fingerprint = fingerprint
         existing.last_seen_at = now
         existing.times_seen += 1
         if run_id is not None:
             existing.last_seen_run_id = run_id
+        repaired = _repair_stale_repost_links(session, existing)
+        if repaired:
+            logger.info(
+                "upsert_job: cleared stale repost link on job id(s) %s "
+                "(content diverged from the linked original; url=%s)",
+                repaired,
+                job.url,
+            )
         return existing, False
 
     repost_of = (
@@ -121,6 +160,9 @@ def upsert_job(
         description=job.description,
         posted_date_text=job.posted_date_text,
         source=job.source,
+        apply_type=job.apply_type,
+        employment_type_text=job.employment_type_text,
+        apply_redirect_url=job.apply_redirect_url,
         content_fingerprint=fingerprint,
         repost_of_job_id=repost_of.id if repost_of is not None else None,
         discovered_at=now,
@@ -135,8 +177,58 @@ def upsert_job(
     return new_job, True
 
 
+def _repair_stale_repost_links(session: Session, job: Job) -> list[int]:
+    """
+    Break repost links that a later fetch has proven wrong.
+
+    A repost link (Job.repost_of_job_id) means "same content, different
+    URL/external_id". It is created once, at INSERT time, from an exact
+    content_fingerprint match. When the FIRST fetch of two listings
+    returned empty/identical content they were wrongly linked; a later
+    fetch with real, distinct content refreshes each fingerprint but not
+    the historical link, so canonical_job_id() keeps collapsing them.
+
+    This runs on every re-sighting, AFTER `job.content_fingerprint` has
+    been refreshed, and clears a link only when its justifying condition
+    — exact fingerprint equality — no longer holds:
+
+      (a) `job` itself: if it reposts a parent whose current fingerprint
+          differs from `job`'s (or the parent is gone), clear
+          `job.repost_of_job_id`.
+      (b) `job`'s direct children: any row that reposts `job` but whose
+          fingerprint now differs from `job`'s is de-linked.
+
+    It NEVER creates a link, NEVER merges rows, NEVER fuzzy-matches, and
+    NEVER rewrites application/recommendation/match rows — those keep the
+    job_id they were written with. Genuine reposts (content still
+    byte-identical after normalisation) are left untouched. Deeper stale
+    chains heal incrementally as each link's row is re-sighted.
+
+    Returns the ids of rows whose repost_of_job_id was cleared.
+    """
+    repaired: list[int] = []
+
+    if job.repost_of_job_id is not None:
+        parent = session.get(Job, job.repost_of_job_id)
+        if parent is None or parent.content_fingerprint != job.content_fingerprint:
+            job.repost_of_job_id = None
+            repaired.append(job.id)
+
+    children = session.query(Job).filter(Job.repost_of_job_id == job.id).all()
+    for child in children:
+        if child.content_fingerprint != job.content_fingerprint:
+            child.repost_of_job_id = None
+            repaired.append(child.id)
+
+    return repaired
+
+
 def add_job_extraction(
-    session: Session, job_id: int, extraction: JobExtractionCreate
+    session: Session,
+    job_id: int,
+    extraction: JobExtractionCreate,
+    *,
+    source_content_fingerprint: str | None = None,
 ) -> JobExtraction:
     """
     Persist a new structured extraction for a job WITHOUT touching the
@@ -145,6 +237,10 @@ def add_job_extraction(
     overwritten) but marked is_current=False, so the full chain stays
     auditable: Job.description (raw) -> JobExtraction.raw_llm_response
     (verbatim LLM output) -> JobExtraction's typed columns (parsed).
+
+    `source_content_fingerprint` should be the Job's content_fingerprint
+    AT THE TIME this extraction was produced — the daily pipeline uses
+    it to detect an unchanged JD and skip re-parsing with the LLM.
     """
     previous_count = session.query(JobExtraction).filter_by(job_id=job_id).count()
     session.query(JobExtraction).filter_by(job_id=job_id, is_current=True).update(
@@ -168,10 +264,120 @@ def add_job_extraction(
         education_requirements=extraction.education_requirements,
         job_type=extraction.job_type,
         raw_llm_response=extraction.raw_llm_response,
+        source_content_fingerprint=source_content_fingerprint,
     )
     session.add(row)
     session.flush()
     return row
+
+
+def current_job_extraction(session: Session, job_id: int) -> JobExtraction | None:
+    """The CURRENT (is_current=True) extraction for a specific job_id —
+    NOT canonicalized, same convention as add_job_extraction itself."""
+    return (
+        session.query(JobExtraction)
+        .filter_by(job_id=job_id, is_current=True)
+        .one_or_none()
+    )
+
+
+def replace_raw_skill_evidence(
+    session: Session,
+    job_id: int,
+    *,
+    ld_json_skills: list[str] | None = None,
+    key_skills_dom: "list | None" = None,
+) -> list[JobRawSkillEvidence]:
+    """
+    Replace the CURRENT raw skill-evidence snapshot for one job.
+    Deletes any existing job_raw_skill_evidence rows for this job_id
+    FIRST, then inserts fresh rows for whatever was passed — never
+    accumulates historical rows across fetches, mirroring how Job's
+    own raw fields (description, salary_text, ...) are already
+    overwritten in place on every re-sighting (see upsert_job).
+
+    job_id must be the SPECIFIC fetched Job.id, never canonicalized —
+    same convention as add_job_extraction/add_run_event.
+
+    Defensively de-duplicates (source, skill_text) pairs within the
+    call so a messy input (e.g. a duplicate chip) can never violate
+    the (job_id, source, skill_text) unique constraint. Accepts
+    anything with `.text`/`.preferred` attributes for key_skills_dom
+    entries (browser.models.KeySkillChip in production; duck-typed in
+    tests) so this stays decoupled from browser/.
+
+    Caller-transactional: uses the caller's existing session, never
+    commits — the delete-then-insert only becomes durable (or is fully
+    undone) when the caller's own session_scope commits or rolls back.
+    """
+    session.query(JobRawSkillEvidence).filter_by(job_id=job_id).delete()
+
+    seen: set[tuple[str, str]] = set()
+    rows: list[JobRawSkillEvidence] = []
+
+    def _add(source: str, text: str, preferred: bool | None) -> None:
+        key = (source, text)
+        if key in seen:
+            return
+        seen.add(key)
+        row = JobRawSkillEvidence(
+            job_id=job_id, source=source, skill_text=text, preferred=preferred
+        )
+        session.add(row)
+        rows.append(row)
+
+    for skill in ld_json_skills or []:
+        if skill and skill.strip():
+            _add("ld_json", skill, None)
+    for chip in key_skills_dom or []:
+        text = getattr(chip, "text", None)
+        if text and text.strip():
+            _add("key_skills_dom", text, bool(getattr(chip, "preferred", False)))
+
+    session.flush()
+    return rows
+
+
+def add_job_extraction_skill_evidence(
+    session: Session,
+    job_extraction_id: int,
+    merged_evidence: "list",  # list[jobs.skill_evidence.MergedSkillEvidence]
+) -> list[JobExtractionSkillEvidence]:
+    """
+    Persist ONE immutable snapshot of merged skill evidence for a
+    SPECIFIC JobExtraction version — call this once, right alongside
+    add_job_extraction(), never to update or reuse another version's
+    rows. A later re-extraction creates its own new JobExtraction row
+    (add_job_extraction's existing behaviour) and its own new,
+    completely separate set of evidence rows here — the previous
+    version's rows are never touched, which is what keeps an old
+    extraction fully auditable after a later fetch or re-extraction.
+
+    Defensively de-duplicates by normalize_skill(skill) (merge_skill_
+    evidence already guarantees this upstream, but this stays safe
+    even if called with a raw, non-deduped list).
+    """
+    seen: set[str] = set()
+    rows: list[JobExtractionSkillEvidence] = []
+    for m in merged_evidence:
+        key = normalize_skill(m.skill)
+        if key in seen:
+            continue
+        seen.add(key)
+        row = JobExtractionSkillEvidence(
+            job_extraction_id=job_extraction_id,
+            skill=m.skill,
+            skill_key=key,
+            classification=m.classification,
+            winning_source=m.source,
+            contributing_sources=list(m.contributing_sources),
+            classification_conflict=m.classification_conflict,
+            conflicting_classifications=[list(pair) for pair in m.conflicting_classifications],
+        )
+        session.add(row)
+        rows.append(row)
+    session.flush()
+    return rows
 
 
 def upsert_job_match(
@@ -265,3 +471,589 @@ def upsert_resume_selection(
     return row, True
 
 
+# ---------------------------------------------------------------------------
+# Scope change: job identity, application history, recommendation history,
+# run audit. The DB is the source of truth for application status; nothing
+# here consults an LLM.
+# ---------------------------------------------------------------------------
+
+
+def canonical_job_id(session: Session, job_id: int) -> int:
+    """Walk Job.repost_of_job_id to the earliest (root) job so a repost
+    of a position resolves to one canonical id everywhere."""
+    seen: set[int] = set()
+    current = job_id
+    while current not in seen:
+        seen.add(current)
+        job = session.get(Job, current)
+        if job is None or job.repost_of_job_id is None:
+            return current
+        current = job.repost_of_job_id
+    return current
+
+
+def resolve_canonical_job(session: Session, ident: "int | str") -> Job | None:
+    """
+    Resolve a job by internal id, Naukri external id, or exact URL —
+    then to its canonical (repost-root) Job. NEVER matches on fuzzy
+    title/company and NEVER uses LLM similarity. Returns None (not a
+    guess) if nothing matches.
+    """
+    job: Job | None = None
+    if isinstance(ident, int) or (isinstance(ident, str) and ident.isdigit() and "//" not in ident):
+        job = session.get(Job, int(ident))
+    if job is None and isinstance(ident, str):
+        ext = extract_external_id(ident) or (ident if ident.isdigit() else None)
+        if ext:
+            job = session.query(Job).filter_by(external_id=ext).one_or_none()
+    if job is None and isinstance(ident, str):
+        job = session.query(Job).filter_by(url=ident).one_or_none()
+    if job is None:
+        return None
+    return session.get(Job, canonical_job_id(session, job.id))
+
+
+def application_status_for_job(session: Session, job_id: int) -> ApplicationStatus:
+    """Status of the CANONICAL job. Absence of a row == NOT_APPLIED."""
+    canon = canonical_job_id(session, job_id)
+    row = session.query(ApplicationHistory).filter_by(job_id=canon).one_or_none()
+    return row.status if row is not None else ApplicationStatus.NOT_APPLIED
+
+
+def get_application_history(session: Session, job_id: int) -> ApplicationHistory | None:
+    return (
+        session.query(ApplicationHistory)
+        .filter_by(job_id=canonical_job_id(session, job_id))
+        .one_or_none()
+    )
+
+
+LABEL_APPLIED_DIRECTLY = "applied directly"
+LABEL_APPLIED_COMPANY = "applied through company website"
+LABEL_NOT_APPLIED = "not applied"
+LABEL_IGNORED = "ignored"
+
+
+def derive_apply_label(status: ApplicationStatus, source: str | None, apply_type: str | None = None) -> str | None:
+    """The plain-words label for a status, or None when the status does not change it (interview, offer...)."""
+    if status == ApplicationStatus.APPLIED:
+        # applied on Naukri itself, by the app after your Yes or by you on a Naukri Apply job -> "directly";
+        # applied on the employer's own site -> "through company website"
+        if (source or "").startswith("agent_auto_apply") or apply_type == "native":
+            return LABEL_APPLIED_DIRECTLY
+        return LABEL_APPLIED_COMPANY
+    if status == ApplicationStatus.NOT_APPLYING:
+        return LABEL_NOT_APPLIED
+    if status == ApplicationStatus.IGNORED:
+        return LABEL_IGNORED
+    return None
+
+
+def application_label(row: "ApplicationHistory") -> str:
+    """The stored label, or the one derived from status + source for rows written before labels existed."""
+    return row.apply_label or derive_apply_label(row.status, row.source) or row.status.value.replace("_", " ").lower()
+
+
+def backfill_apply_labels(session: Session) -> int:
+    """Give every row that has no label the one it would have had. Safe to repeat. Returns how many were set."""
+    n = 0
+    for row in session.query(ApplicationHistory).filter(ApplicationHistory.apply_label.is_(None)):
+        label = derive_apply_label(row.status, row.source)
+        if label:
+            row.apply_label = label
+            n += 1
+    session.flush()
+    return n
+
+
+def upsert_application_history(
+    session: Session,
+    job_id: int,
+    *,
+    status: ApplicationStatus = ApplicationStatus.APPLIED,
+    applied_at: "datetime.datetime | None" = None,
+    resume_id: str | None = None,
+    resume_file_path: str | None = None,
+    resume_file_hash: str | None = None,
+    source: str = "manual_cli",
+    note: str | None = None,
+    apply_label: str | None = None,
+) -> tuple[ApplicationHistory, bool]:
+    """
+    Create or update the ONE ApplicationHistory row for a job's
+    canonical id, and record an ApplicationEvent for the transition.
+    Idempotent: re-marking never inserts a duplicate. This is the only
+    write path for application status besides set_application_status().
+    """
+    canon = canonical_job_id(session, job_id)
+    job = session.get(Job, canon)
+    now = datetime.datetime.now(datetime.UTC)
+    existing = session.query(ApplicationHistory).filter_by(job_id=canon).one_or_none()
+
+    if existing is None:
+        row = ApplicationHistory(
+            job_id=canon,
+            external_job_id=(job.external_id if job else None),
+            job_url=(job.url if job else str(job_id)),
+            job_title=(job.title if job else ""),
+            company=(job.company if job else ""),
+            location=(job.location if job else None),
+            status=status,
+            applied_at=applied_at
+            or (now if status in (ApplicationStatus.APPLIED,) else None),
+            resume_id=resume_id,
+            resume_file_path=resume_file_path,
+            resume_file_hash=resume_file_hash,
+            source=source,
+            notes=note,
+            apply_label=apply_label or derive_apply_label(status, source, job.apply_type if job else None),
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            ApplicationEvent(
+                application_id=row.id,
+                from_status=None,
+                to_status=status,
+                source=source,
+                note=note,
+            )
+        )
+        session.flush()
+        return row, True
+
+    from_status = existing.status
+    existing.status = status
+    if applied_at is not None:
+        existing.applied_at = applied_at
+    elif status == ApplicationStatus.APPLIED and existing.applied_at is None:
+        existing.applied_at = now
+    if resume_id is not None:
+        existing.resume_id = resume_id
+        existing.resume_file_path = resume_file_path
+        existing.resume_file_hash = resume_file_hash
+    if note is not None:
+        existing.notes = note
+    existing.source = source
+    new_label = apply_label or derive_apply_label(status, source, job.apply_type if job else None)
+    if new_label:
+        existing.apply_label = new_label
+    existing.updated_at = now
+    session.add(
+        ApplicationEvent(
+            application_id=existing.id,
+            from_status=from_status,
+            to_status=status,
+            source=source,
+            note=note,
+        )
+    )
+    session.flush()
+    return existing, False
+
+
+def set_application_status(
+    session: Session,
+    job_id: int,
+    new_status: ApplicationStatus,
+    *,
+    source: str = "manual_cli",
+    note: str | None = None,
+) -> ApplicationHistory:
+    row, _created = upsert_application_history(
+        session, job_id, status=new_status, source=source, note=note
+    )
+    return row
+
+
+def excluded_job_ids_by_status(
+    session: Session, statuses: "list[str] | set[str]"
+) -> set[int]:
+    """Canonical job ids whose ApplicationHistory.status is in `statuses`
+    — excluded from recommendations regardless of cooldown."""
+    wanted = {s.upper() for s in statuses}
+    if not wanted:
+        return set()
+    rows = (
+        session.query(ApplicationHistory.job_id)
+        .filter(ApplicationHistory.status.in_([ApplicationStatus(s) for s in wanted if s in ApplicationStatus.__members__]))
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def followup_candidates(session: Session, now: "datetime.datetime", lookback_days: int, limit: int = 12) -> list[dict]:
+    """
+    Company-website jobs that were in a recent digest and that you have not answered for yet: the ones the Telegram
+    "did you apply?" question is about. Newest first. A job with a recorded status (applied, not applying, ignored...)
+    is never here. Pure reads.
+    """
+    from naukri_agent.database.models import JobRecommendation
+
+    since = _naive_utc(now) - datetime.timedelta(days=lookback_days)
+    latest: dict[int, datetime.datetime] = {}
+    for job_id, when in session.query(JobRecommendation.job_id, JobRecommendation.recommended_at).filter(
+        JobRecommendation.recommended_at >= since
+    ):
+        if job_id not in latest or when > latest[job_id]:
+            latest[job_id] = when
+    out: list[dict] = []
+    for job_id, when in sorted(latest.items(), key=lambda kv: kv[1], reverse=True):
+        job = session.get(Job, canonical_job_id(session, job_id))
+        if job is None or job.apply_type != "company_site":
+            continue
+        if any(o["job_id"] == job.id for o in out):
+            continue
+        if application_status_for_job(session, job.id) not in (ApplicationStatus.NOT_APPLIED, ApplicationStatus.UNKNOWN):
+            continue
+        prompt = session.query(FollowupPrompt).filter_by(job_id=job.id).one_or_none()
+        sel = latest_resume_selection(session, job.id)
+        out.append({
+            "job_id": job.id, "title": job.title, "company": job.company, "location": job.location,
+            "url": job.url, "apply_redirect_url": job.apply_redirect_url,
+            "resume_id": sel.resume_id if sel is not None else None,
+            "later_count": prompt.later_count if prompt is not None else 0,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def record_followup_answer(
+    session: Session, job_id: int, answer: str, *, ignore_after_later: int, now: "datetime.datetime | None" = None
+) -> tuple[str, int]:
+    """
+    Record your answer to "did you apply?". answer: "applied" | "not_applying" | "later".
+    Returns (outcome, later_count) where outcome is "applied", "not_applying", "later" or "ignored".
+    The `ignore_after_later`-th "Later" in a row turns the job into IGNORED. Applied / not applying settle it at once.
+    """
+    now = now or datetime.datetime.now(datetime.UTC)
+    canon = canonical_job_id(session, job_id)
+    if answer not in ("applied", "not_applying", "later"):
+        raise ValueError(f"unknown answer {answer!r}")
+    prompt = session.query(FollowupPrompt).filter_by(job_id=canon).one_or_none()
+    if prompt is None and answer == "later":  # a counter row only ever exists for a job you have put off
+        prompt = FollowupPrompt(job_id=canon, later_count=0)
+        session.add(prompt)
+    if prompt is not None:
+        prompt.last_asked_at = _naive_utc(now)
+    if answer == "applied":
+        sel = latest_resume_selection(session, canon)
+        upsert_application_history(
+            session, canon, status=ApplicationStatus.APPLIED, resume_id=sel.resume_id if sel is not None else None,
+            source="telegram_followup", note="You confirmed on Telegram that you applied on the company's website.",
+        )
+        session.flush()
+        return "applied", prompt.later_count if prompt is not None else 0
+    if answer == "not_applying":
+        upsert_application_history(
+            session, canon, status=ApplicationStatus.NOT_APPLYING, source="telegram_followup",
+            note="You said on Telegram that you are not applying.",
+        )
+        session.flush()
+        return "not_applying", prompt.later_count if prompt is not None else 0
+    prompt.later_count += 1
+    if prompt.later_count >= ignore_after_later:
+        upsert_application_history(
+            session, canon, status=ApplicationStatus.IGNORED, source="telegram_followup",
+            note=f"You answered Later {prompt.later_count} times in a row, so it is ignored from now on.",
+        )
+        session.flush()
+        return "ignored", prompt.later_count
+    session.flush()
+    return "later", prompt.later_count
+
+
+def list_applications(
+    session: Session, *, status: ApplicationStatus | None = None
+) -> list[ApplicationHistory]:
+    q = session.query(ApplicationHistory)
+    if status is not None:
+        q = q.filter_by(status=status)
+    return q.order_by(ApplicationHistory.updated_at.desc()).all()
+
+
+def latest_job_match(session: Session, candidate_id: int, job_id: int) -> JobMatch | None:
+    return (
+        session.query(JobMatch)
+        .filter_by(candidate_id=candidate_id, job_id=job_id)
+        .one_or_none()
+    )
+
+
+def latest_resume_selection(session: Session, job_id: int) -> ResumeSelection | None:
+    return (
+        session.query(ResumeSelection)
+        .filter_by(job_id=job_id)
+        .order_by(ResumeSelection.selected_at.desc())
+        .first()
+    )
+
+
+def job_recommendation_history(
+    session: Session, candidate_id: int, job_id: int
+) -> list[JobRecommendation]:
+    canon = canonical_job_id(session, job_id)
+    return (
+        session.query(JobRecommendation)
+        .filter_by(candidate_id=candidate_id, job_id=canon)
+        .order_by(JobRecommendation.recommended_at.asc())
+        .all()
+    )
+
+
+def latest_recommendation(
+    session: Session, candidate_id: int, job_id: int
+) -> JobRecommendation | None:
+    history = job_recommendation_history(session, candidate_id, job_id)
+    return history[-1] if history else None
+
+
+def record_job_recommendation(
+    session: Session,
+    *,
+    candidate_id: int,
+    job_id: int,
+    daily_run_id: int | None,
+    rank: int,
+    score_at_email: float,
+    decision_at_email: MatchDecision,
+    application_status_at_email: ApplicationStatus,
+    job_match_id: int | None = None,
+    resume_id_at_email: str | None = None,
+    recommended_at: "datetime.datetime | None" = None,
+    email_status: str = "rendered",
+) -> JobRecommendation:
+    canon = canonical_job_id(session, job_id)
+    row = JobRecommendation(
+        candidate_id=candidate_id,
+        job_id=canon,
+        job_match_id=job_match_id,
+        daily_run_id=daily_run_id,
+        rank=rank,
+        score_at_email=score_at_email,
+        decision_at_email=decision_at_email,
+        application_status_at_email=application_status_at_email,
+        resume_id_at_email=resume_id_at_email,
+        recommended_at=recommended_at or datetime.datetime.now(datetime.UTC),
+        email_status=email_status,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+# ---------------------------------------------------------------------------
+# Phase 14: apply-agent question audit log. Purely additive; never
+# consulted by scoring/matching/recommendation logic.
+# ---------------------------------------------------------------------------
+
+
+def add_application_question(
+    session: Session,
+    *,
+    job_id: int,
+    attempt_id: str,
+    order_in_attempt: int,
+    question_text: str,
+    was_skipped: bool = False,
+    drafted_answer: str | None = None,
+    final_answer: str | None = None,
+    human_edited: bool = False,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    application_id: int | None = None,
+) -> ApplicationQuestion:
+    """
+    Record one question asked during an apply attempt. Called once per
+    question, immediately as it's drafted/skipped — not deferred to one
+    final commit — so an aborted attempt still leaves a durable partial
+    audit trail. job_id should be the CANONICAL job id.
+    """
+    row = ApplicationQuestion(
+        job_id=job_id,
+        application_id=application_id,
+        attempt_id=attempt_id,
+        order_in_attempt=order_in_attempt,
+        question_text=question_text,
+        was_skipped=was_skipped,
+        drafted_answer=drafted_answer,
+        final_answer=final_answer,
+        human_edited=human_edited,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def link_application_questions_to_history(
+    session: Session, attempt_id: str, application_id: int
+) -> int:
+    """
+    Bulk-backfill application_id onto every ApplicationQuestion row for
+    one attempt_id. Called once, right after a successful
+    upsert_application_history() for an agent_auto_apply submission.
+    Returns the row count updated.
+    """
+    result = (
+        session.query(ApplicationQuestion)
+        .filter_by(attempt_id=attempt_id)
+        .update({"application_id": application_id})
+    )
+    session.flush()
+    return result
+
+
+def list_application_questions(
+    session: Session, *, job_id: int | None = None, attempt_id: str | None = None
+) -> list[ApplicationQuestion]:
+    """Read helper for audit/debugging/tests only — never consulted by
+    scoring or recommendation logic."""
+    q = session.query(ApplicationQuestion)
+    if job_id is not None:
+        q = q.filter_by(job_id=job_id)
+    if attempt_id is not None:
+        q = q.filter_by(attempt_id=attempt_id)
+    return q.order_by(ApplicationQuestion.order_in_attempt.asc()).all()
+
+
+def add_run_event(
+    session: Session,
+    *,
+    daily_run_id: int,
+    seq: int,
+    stage: str,
+    status: RunEventStatus,
+    job_id: int | None = None,
+    detail: dict | None = None,
+) -> RunEvent:
+    row = RunEvent(
+        daily_run_id=daily_run_id,
+        seq=seq,
+        stage=stage,
+        status=status,
+        job_id=job_id,
+        detail=detail,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _naive_utc(moment: "datetime.datetime") -> "datetime.datetime":
+    """SQLite hands back naive datetimes (stored as UTC); comparing them with an
+    aware one raises TypeError. Normalise to naive UTC before comparing."""
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(datetime.UTC).replace(tzinfo=None)
+    return moment
+
+
+def add_auto_apply_attempt(
+    session: Session, *, job_id: int, attempt_id: str, outcome: str, detail: str | None = None
+) -> "AutoApplyAttempt":
+    from naukri_agent.database.models import AutoApplyAttempt
+
+    row = AutoApplyAttempt(job_id=job_id, attempt_id=attempt_id, outcome=outcome, detail=detail)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def auto_apply_count_since(session: Session, since: "datetime.datetime") -> int:
+    """Attempts in the window that count toward the daily cap: applied, and
+    unconfirmed (it may well have gone through, so it must not be free)."""
+    from naukri_agent.database.models import AutoApplyAttempt
+
+    since = _naive_utc(since)
+    return (
+        session.query(AutoApplyAttempt)
+        .filter(AutoApplyAttempt.attempted_at >= since, AutoApplyAttempt.outcome.in_(("applied", "unconfirmed")))
+        .count()
+    )
+
+
+def auto_apply_job_ids_to_skip(session: Session, now: "datetime.datetime") -> set[int]:
+    """Jobs auto-apply must not touch again: anything attempted in the last 30
+    days (applied / needs_human / unconfirmed / not_native), except a plain
+    failure, which only blocks a retry for a day."""
+    from naukri_agent.database.models import AutoApplyAttempt
+
+    now = _naive_utc(now)
+    skip: set[int] = set()
+    for row in session.query(AutoApplyAttempt).filter(AutoApplyAttempt.attempted_at >= now - datetime.timedelta(days=30)):
+        if row.outcome in ("failed", "no_reply") and row.attempted_at < now - datetime.timedelta(days=1):
+            continue
+        skip.add(row.job_id)
+    return skip
+
+
+def add_resume_refresh(
+    session: Session, *, resume_id: str, outcome: str, file_hash: str | None = None, detail: str | None = None,
+    attempted_at: "datetime.datetime | None" = None,
+):
+    from naukri_agent.database.models import ResumeRefresh
+
+    row = ResumeRefresh(resume_id=resume_id, outcome=outcome, file_hash=file_hash, detail=detail)
+    if attempted_at is not None:
+        row.attempted_at = _naive_utc(attempted_at)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def last_uploaded_resume(session: Session):
+    """The most recent ResumeRefresh row that really uploaded, or None."""
+    from naukri_agent.database.models import ResumeRefresh
+
+    return (
+        session.query(ResumeRefresh)
+        .filter(ResumeRefresh.outcome == "uploaded")
+        .order_by(ResumeRefresh.id.desc())
+        .first()
+    )
+
+
+def add_job_research(
+    session: Session, *, job_id: int, status: str, model: str, report_json: str | None = None,
+    error: str | None = None, steps: int = 0, prompt_tokens: int = 0, completion_tokens: int = 0,
+    created_at: "datetime.datetime | None" = None,
+):
+    from naukri_agent.database.models import JobResearch
+
+    row = JobResearch(
+        job_id=job_id, status=status, model=model, report_json=report_json, error=(error or None) and error[:200],
+        steps=steps, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+    )
+    if created_at is not None:
+        row.created_at = _naive_utc(created_at)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def job_ids_researched_since(session: Session, since: "datetime.datetime") -> set[int]:
+    """Jobs with a SUCCESSFUL research row at or after `since` (a failed attempt may be retried)."""
+    from naukri_agent.database.models import JobResearch
+
+    rows = (
+        session.query(JobResearch.job_id)
+        .filter(JobResearch.status == "ok", JobResearch.created_at >= _naive_utc(since))
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def research_tokens_since(session: Session, since: "datetime.datetime") -> int:
+    """Model tokens (prompt + completion) the researcher used at or after `since`."""
+    from sqlalchemy import func
+
+    from naukri_agent.database.models import JobResearch
+
+    total = (
+        session.query(func.coalesce(func.sum(JobResearch.prompt_tokens + JobResearch.completion_tokens), 0))
+        .filter(JobResearch.created_at >= _naive_utc(since))
+        .scalar()
+    )
+    return int(total or 0)
