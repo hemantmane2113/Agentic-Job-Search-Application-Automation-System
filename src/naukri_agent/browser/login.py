@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 # login submit. Used with 'domcontentloaded' / 'load' — NEVER
 # 'networkidle' (see _settle_after_login_submit).
 _POST_SUBMIT_SETTLE_TIMEOUT_MS = 15000
+# Naukri's login page can show its login form for a moment and THEN redirect a logged-in session onward (seen live on
+# 2026-10-10 at 10:00: the form flashed, the check ran, the page moved on, and the run waited 30s for a box that was gone).
+# A form that is really there stays there, so give a late redirect this long to land before believing "logged out".
+_LATE_REDIRECT_GRACE_MS = 6000
+_LATE_REDIRECT_POLL_MS = 300
 
 
 def _login_step(description: str, action, *, url: str | None = None):
@@ -268,6 +273,25 @@ def _authenticated_after_goto(page: Any) -> bool:
     return avatar or redirected
 
 
+def _in_session(page: Any) -> bool:
+    """The page is on an authenticated Naukri page (avatar showing, or moved onto /mnjuser). Read-only."""
+    return is_authenticated(page) or selectors.LOGIN_SUCCESS_URL_FRAGMENT in (_safe_current_url(page) or "")
+
+
+def _redirect_arrives_late(page: Any) -> bool:
+    """Wait a short, bounded time for a late redirect into the session. True the moment it lands."""
+    waited = 0
+    while waited < _LATE_REDIRECT_GRACE_MS:
+        if _in_session(page):
+            return True
+        try:
+            page.wait_for_timeout(_LATE_REDIRECT_POLL_MS)
+        except Exception:  # noqa: BLE001 - a page that cannot wait just ends the grace period
+            break
+        waited += _LATE_REDIRECT_POLL_MS
+    return _in_session(page)
+
+
 def login(page: Any, settings: Settings) -> LoginResult:
     """
     Attempt to log in using settings.naukri_email/naukri_password —
@@ -338,10 +362,29 @@ def login(page: Any, settings: Settings) -> LoginResult:
             "depends on the caller (naukri-agent inspect does)."
         )
 
-    _login_step(
-        "page.fill(LOGIN_EMAIL_INPUT)",
-        lambda: page.fill(selectors.LOGIN_EMAIL_INPUT, settings.naukri_email),
-    )
+    if _redirect_arrives_late(page):
+        logger.info("login: the session redirected onward after the form flashed - login form not touched")
+        return LoginResult(
+            status=LoginStatus.SUCCESS,
+            message="Already authenticated: the login page redirected the session onward after a moment - login form never touched.",
+            current_url=_safe_current_url(page),
+        )
+
+    try:
+        _login_step(
+            "page.fill(LOGIN_EMAIL_INPUT)",
+            lambda: page.fill(selectors.LOGIN_EMAIL_INPUT, settings.naukri_email),
+        )
+    except Exception:
+        # The email box can vanish because the page moved a logged-in session onward; that is success, not a failure.
+        if _in_session(page):
+            logger.info("login: the email box went away because the session is logged in")
+            return LoginResult(
+                status=LoginStatus.SUCCESS,
+                message="Already authenticated: the login form disappeared because the session was redirected onward.",
+                current_url=_safe_current_url(page),
+            )
+        raise
     _login_step(
         "page.fill(LOGIN_PASSWORD_INPUT)",
         lambda: page.fill(selectors.LOGIN_PASSWORD_INPUT, settings.naukri_password),

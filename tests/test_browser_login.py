@@ -789,3 +789,52 @@ def test_post_goto_state_capture_and_auth_check_are_logged_in_the_flow(tmp_path,
     msgs = [r.getMessage() for r in caplog.records]
     assert any("login-state[post_goto]" in m for m in msgs)
     assert any(m.startswith("post-goto auth check: avatar=False") for m in msgs)
+
+
+# --- the login form that flashes before a logged-in session is redirected (live 2026-10-10 10:00) -----------------------
+
+
+def test_a_late_redirect_after_the_form_flashed_is_success_and_nothing_is_typed():
+    page = FakePage()
+    page.set_element(selectors.LOGIN_EMAIL_INPUT, FakeElement())  # the form is on screen at first
+    waits = []
+
+    def move_on_after_a_moment(ms):
+        waits.append(ms)
+        if len(waits) == 3:  # a second later the page redirects the session to the homepage
+            page.url = "https://www.naukri.com/mnjuser/homepage"
+
+    page.wait_for_timeout = move_on_after_a_moment
+    result = login_module.login(page, _settings())
+    assert result.status == LoginStatus.SUCCESS and "redirected" in result.message.lower()
+    assert page.filled == {} and page.clicked == [] and len(waits) == 3
+
+
+def test_a_form_that_really_stays_gets_only_a_short_wait_then_the_normal_login():
+    page = FakePage()
+    waits = []
+    page.wait_for_timeout = waits.append
+    page.on_click = lambda sel: setattr(page, "url", "https://www.naukri.com/mnjuser/homepage")
+    result = login_module.login(page, _settings())
+    assert result.status == LoginStatus.SUCCESS and page.filled[selectors.LOGIN_EMAIL_INPUT] == "candidate@example.com"
+    assert sum(waits) <= login_module._LATE_REDIRECT_GRACE_MS + 15000  # a bounded grace, never an open-ended wait
+
+
+def test_the_email_box_vanishing_because_the_session_moved_on_is_success_not_a_failure():
+    class VanishingPage(FakePage):
+        def fill(self, selector, value, **kw):
+            self.url = "https://www.naukri.com/mnjuser/homepage"  # the page moved on while we were trying to type
+            raise TimeoutError("Page.fill: Timeout 30000ms exceeded.")
+
+    page = VanishingPage()
+    result = login_module.login(page, _settings())
+    assert result.status == LoginStatus.SUCCESS and "disappeared" in result.message
+
+
+def test_a_real_fill_timeout_on_a_logged_out_page_is_still_an_error():
+    class StuckPage(FakePage):
+        def fill(self, selector, value, **kw):
+            raise TimeoutError("Page.fill: Timeout 30000ms exceeded.")
+
+    with pytest.raises(TimeoutError):
+        login_module.login(StuckPage(), _settings())
