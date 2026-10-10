@@ -37,9 +37,21 @@ def _dir_writable(path) -> bool:
         return False
 
 
+# Commands that do real work for minutes or hours. While one runs, Windows is asked not to go to sleep (the screen may
+# still turn off). The long-lived listeners (telegram-listen, scheduler) are NOT here: they would keep the PC awake forever.
+_KEEP_AWAKE_COMMANDS = frozenset({
+    "run-daily", "recommend", "run-now", "research-jobs", "weekly-report", "profile-refresh", "telegram-apply", "auto-apply", "discover",
+})
+
+
 @click.group()
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """Agentic job-search and application-assistance system for Naukri.com."""
+    if ctx.invoked_subcommand in _KEEP_AWAKE_COMMANDS:
+        from naukri_agent.power import keep_awake
+
+        ctx.with_resource(keep_awake(ctx.invoked_subcommand))  # released when the command ends, however it ends
 
 
 @cli.command("doctor")
