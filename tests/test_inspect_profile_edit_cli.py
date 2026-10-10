@@ -21,7 +21,7 @@ def _run(*args):
 def test_completed_report_exits_zero(monkeypatch):
     monkeypatch.setattr(cli_main, "get_settings", lambda: _settings())
     monkeypatch.setattr(
-        "naukri_agent.browser.profile_inspection.run_profile_edit_inspection",
+        "naukri_agent.legacy.profile_inspection.run_profile_edit_inspection",
         lambda settings, isolated_profile=True, capture_after_manual_open=False: {"completed": True, "steps": []},
     )
     result = _run("inspect-profile-edit")
@@ -31,7 +31,7 @@ def test_completed_report_exits_zero(monkeypatch):
 def test_incomplete_report_exits_nonzero(monkeypatch):
     monkeypatch.setattr(cli_main, "get_settings", lambda: _settings())
     monkeypatch.setattr(
-        "naukri_agent.browser.profile_inspection.run_profile_edit_inspection",
+        "naukri_agent.legacy.profile_inspection.run_profile_edit_inspection",
         lambda settings, isolated_profile=True, capture_after_manual_open=False: {"completed": False, "steps": []},
     )
     result = _run("inspect-profile-edit")
@@ -47,7 +47,7 @@ def test_reuse_session_flag_passes_isolated_profile_false(monkeypatch):
         return {"completed": True, "steps": []}
 
     monkeypatch.setattr(
-        "naukri_agent.browser.profile_inspection.run_profile_edit_inspection", _fake
+        "naukri_agent.legacy.profile_inspection.run_profile_edit_inspection", _fake
     )
     _run("inspect-profile-edit", "--reuse-session")
     assert calls == [False]
@@ -61,7 +61,7 @@ def test_manual_open_capture_is_on_by_default_and_can_be_turned_off(monkeypatch)
         seen.append(capture_after_manual_open)
         return {"completed": True, "steps": []}
 
-    monkeypatch.setattr("naukri_agent.browser.profile_inspection.run_profile_edit_inspection", _fake)
+    monkeypatch.setattr("naukri_agent.legacy.profile_inspection.run_profile_edit_inspection", _fake)
     _run("inspect-profile-edit")
     _run("inspect-profile-edit", "--no-manual-open")
     assert seen == [True, False]

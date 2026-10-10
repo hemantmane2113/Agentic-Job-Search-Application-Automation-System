@@ -150,11 +150,11 @@ APPLY_DRAWER = ".chatbot_Drawer"
 # are answered the same way: click the label, then the drawer's Save.
 APPLY_CHOICE_LABEL = "label.ssrc__label, label.mcc__label"
 APPLY_DRAWER_SAVE = ".chatbot_Drawer .sendMsg"
-# UNVERIFIED (a guess, 2026-10-09). A free-text or number answer: on 2026-10-09 two jobs (Straive, Indium) with such
-# questions both timed out in Page.fill on the older guess APPLY_ANSWER_INPUT below, so that selector does not describe
-# the real input. This one is scoped to the VERIFIED drawer above and covers the usual kinds of answer box. It is tried
-# first, the older guess second, and when neither is found the page's screenshot and the drawer's HTML are saved
-# (inspection_output/auto_apply/<attempt>_failure.*) so the real selector can be read off them.
+# VERIFIED 2026-10-10 (Straive and Indium Software applications; the saved panel of the Indium attempt shows the answers typed
+# in and the box itself: <div class="textArea" contenteditable="true"> inside .chatbot_Drawer). A free-text or number answer is
+# typed there, then the drawer's Save is pressed. Before that the older guess APPLY_ANSWER_INPUT below was tried and timed out on
+# 2026-10-09, so it is only a fallback now. When neither box is found the panel's screenshot and HTML are saved
+# (inspection_output/auto_apply/<attempt>_failure.*).
 APPLY_DRAWER_TEXT_INPUT = (
     ".chatbot_Drawer [contenteditable='true'], .chatbot_Drawer textarea, "
     ".chatbot_Drawer input[type='text'], .chatbot_Drawer input[type='number'], .chatbot_Drawer input:not([type])"

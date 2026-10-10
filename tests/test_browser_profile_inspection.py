@@ -1,5 +1,5 @@
 """
-browser/profile_inspection.py: the prerequisite read-only inspection
+legacy/profile_inspection.py: the prerequisite read-only inspection
 for a future resume/profile "touch" feature. Mirrors
 test_browser_inspection.py's CAPTCHA/MFA mocked-browser pattern.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 
 from naukri_agent.browser import selectors
-from naukri_agent.browser.profile_inspection import run_profile_edit_inspection
+from naukri_agent.legacy.profile_inspection import run_profile_edit_inspection
 from naukri_agent.config import Settings
 
 from .browser_fakes import FakeElement, FakePage
@@ -39,7 +39,7 @@ def _settings(tmp_path, **overrides) -> Settings:
 
 
 def _patch_browser_manager(monkeypatch, manager: FakeBrowserManager) -> None:
-    import naukri_agent.browser.profile_inspection as module
+    import naukri_agent.legacy.profile_inspection as module
 
     monkeypatch.setattr(module, "BrowserManager", lambda settings, profile_dir_override=None: manager)
 
@@ -112,7 +112,7 @@ def test_module_never_calls_a_mutating_page_method():
     """Structural guard: this module must only ever read — never
     fill/click/select anything (goto for navigation is the one
     exception, same as every other read-only inspection tool)."""
-    import naukri_agent.browser.profile_inspection as module
+    import naukri_agent.legacy.profile_inspection as module
 
     src = inspect.getsource(module)
     assert ".fill(" not in src

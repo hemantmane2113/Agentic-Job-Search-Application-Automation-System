@@ -427,7 +427,7 @@ class ApplySubmissionResult(BaseModel):
 # ---------------------------------------------------------------------------
 # Profile-edit inspection (prerequisite for a future resume/profile
 # "touch to refresh last-updated" feature — read-only only; see
-# browser/profile_inspection.py). Naukri's profile-EDIT page DOM has
+# legacy/profile_inspection.py). Naukri's profile-EDIT page DOM has
 # never been inspected by this codebase; browser/profile.py only ever
 # reads the resume SECTION of the read-only profile view.
 # ---------------------------------------------------------------------------

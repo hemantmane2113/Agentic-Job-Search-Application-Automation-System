@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 import naukri_agent.cli.main as cli_main
 from naukri_agent.config import Settings
-from naukri_agent.orchestration.apply_runner import ApplyRunResult
+from naukri_agent.legacy.apply_runner import ApplyRunResult
 
 
 def _settings(**overrides) -> Settings:
@@ -30,7 +30,7 @@ def no_call_guard(monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("run_apply_workflow must not be called when the gate is closed")
 
-    monkeypatch.setattr("naukri_agent.orchestration.apply_runner.run_apply_workflow", _boom)
+    monkeypatch.setattr("naukri_agent.legacy.apply_runner.run_apply_workflow", _boom)
 
 
 def test_default_settings_refuse_to_run(monkeypatch, no_call_guard):
@@ -67,7 +67,7 @@ def test_both_gates_open_invokes_run_apply_workflow(monkeypatch):
         return canned
 
     monkeypatch.setattr(
-        "naukri_agent.orchestration.apply_runner.run_apply_workflow", _fake_run
+        "naukri_agent.legacy.apply_runner.run_apply_workflow", _fake_run
     )
 
     result = _run("apply", "123")
@@ -89,7 +89,7 @@ def test_reuse_session_flag_passes_isolated_profile_false(monkeypatch):
         return ApplyRunResult(job_id=1, title="T", company="C", attempt_id="a", submitted=True)
 
     monkeypatch.setattr(
-        "naukri_agent.orchestration.apply_runner.run_apply_workflow", _fake_run
+        "naukri_agent.legacy.apply_runner.run_apply_workflow", _fake_run
     )
 
     _run("apply", "123", "--reuse-session")
@@ -100,7 +100,7 @@ def test_non_submitted_result_exits_nonzero(monkeypatch):
     settings = _settings(auto_apply=True, dry_run=False)
     monkeypatch.setattr(cli_main, "get_settings", lambda: settings)
     monkeypatch.setattr(
-        "naukri_agent.orchestration.apply_runner.run_apply_workflow",
+        "naukri_agent.legacy.apply_runner.run_apply_workflow",
         lambda *a, **k: ApplyRunResult(
             job_id=1, title="T", company="C", attempt_id="a", submitted=False,
             aborted_reason="user declined final confirmation",

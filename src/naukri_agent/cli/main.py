@@ -385,7 +385,7 @@ def inspect_profile_edit(reuse_session: bool, manual_open: bool) -> None:
     against your own account.
     """
     settings = get_settings()
-    from naukri_agent.browser.profile_inspection import run_profile_edit_inspection
+    from naukri_agent.legacy.profile_inspection import run_profile_edit_inspection
 
     report = run_profile_edit_inspection(
         settings, isolated_profile=not reuse_session, capture_after_manual_open=manual_open
@@ -431,7 +431,7 @@ def apply_(job: str, reuse_session: bool) -> None:
             "`apply` is disabled. Set AUTO_APPLY=true and DRY_RUN=false to enable it "
             "(both are required, on top of this command's own per-step human approval)."
         )
-    from naukri_agent.orchestration.apply_runner import run_apply_workflow
+    from naukri_agent.legacy.apply_runner import run_apply_workflow
 
     result = run_apply_workflow(settings, job, isolated_profile=not reuse_session)
     click.echo(json.dumps(result.model_dump(), indent=2, default=str))

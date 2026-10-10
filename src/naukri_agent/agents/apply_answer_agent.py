@@ -21,7 +21,7 @@ an open-ended free-text task:
     application-form question is, after all, server/employer-authored
     text flowing through Naukri.
   - the real anti-fabrication backstop is structural, not this module:
-    orchestration/apply_runner.py NEVER auto-accepts a draft — a human
+    legacy/apply_runner.py NEVER auto-accepts a draft — a human
     reviews the full batch before anything is typed into a real
     application. This module only ever proposes.
 

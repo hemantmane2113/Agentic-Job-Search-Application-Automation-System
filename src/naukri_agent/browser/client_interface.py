@@ -64,7 +64,7 @@ class JobBoardClient(ABC):
 
     # --- Phase 14: apply-write surface ---
     # Every method below is a real, potentially mutating browser action.
-    # They must only ever be reached via orchestration/apply_runner.py's
+    # They must only ever be reached via legacy/apply_runner.py's
     # human-gated flow — never called directly from an AI node or any
     # unattended pipeline.
 
@@ -92,4 +92,4 @@ class JobBoardClient(ABC):
         """Final, irreversible submit. Must only ever be called after
         every question has been answered or skipped AND a human has
         explicitly confirmed submission — enforced by the caller
-        (orchestration/apply_runner.py), not by this method itself."""
+        (legacy/apply_runner.py), not by this method itself."""

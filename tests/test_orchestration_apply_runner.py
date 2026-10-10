@@ -1,5 +1,5 @@
 """
-orchestration/apply_runner.py: the Phase 14 apply-agent pipeline logic.
+legacy/apply_runner.py: the Phase 14 apply-agent pipeline logic.
 Browser/LLM are faked at their construction points (same mocked-browser
 tier as the rest of this project) so these tests exercise the
 orchestration logic — database writes, the batch-review gate, the
@@ -13,7 +13,7 @@ from naukri_agent.candidate.models import CandidateProfile
 from naukri_agent.database.base import init_db, session_scope
 from naukri_agent.database.models import ApplicationHistory, ApplicationQuestion
 from naukri_agent.database.repositories import list_application_questions
-from naukri_agent.orchestration.apply_runner import ApplyUserInteraction, run_apply_workflow
+from naukri_agent.legacy.apply_runner import ApplyUserInteraction, run_apply_workflow
 from naukri_agent.resume.models import MasterResume
 
 from .digest_fakes import add_job, settings as _digest_settings

@@ -50,3 +50,6 @@ htmlcov/
 
 config/backup/
 out/
+
+# Claude Code local settings
+.claude/
