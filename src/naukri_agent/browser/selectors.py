@@ -144,7 +144,11 @@ ALREADY_APPLIED_MARKER = "#already-applied"
 # `.chatbot_Drawer .sendMsg`; its parent carries class `disabled` until an option
 # is chosen.
 APPLY_DRAWER = ".chatbot_Drawer"
-APPLY_CHOICE_LABEL = "label.ssrc__label"
+# One option of a choice question. Radio options: label.ssrc__label (VERIFIED 2026-10-08). Checkbox options (a
+# multi-select question such as "Please select the city you are currently residing or willing to relocate to"):
+# label.mcc__label inside .multiselectcheckboxes (VERIFIED 2026-10-10 from the saved panel of a failed attempt). Both
+# are answered the same way: click the label, then the drawer's Save.
+APPLY_CHOICE_LABEL = "label.ssrc__label, label.mcc__label"
 APPLY_DRAWER_SAVE = ".chatbot_Drawer .sendMsg"
 # UNVERIFIED (a guess, 2026-10-09). A free-text or number answer: on 2026-10-09 two jobs (Straive, Indium) with such
 # questions both timed out in Page.fill on the older guess APPLY_ANSWER_INPUT below, so that selector does not describe

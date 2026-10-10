@@ -425,3 +425,12 @@ def test_the_approval_prompt_receives_the_candidates_years_so_the_phone_can_comp
 
     go(c, factory, FakeClient({urls["yrs"]: {}}), Spy())
     assert seen == [CAND.years_experience]
+
+
+def test_a_question_naukri_did_not_ask_is_written_into_the_result(tmp_path):
+    c = cfg(tmp_path)
+    factory, urls = seed(c, [("s", "040926001481", 95.0, {})])
+    fake = FakeClient({urls["s"]: {}})
+    fake.skipped_questions = lambda: ["What is your notice period?"]
+    r = run(c, factory, fake)
+    assert r.outcomes[0].outcome == "applied" and "Naukri did not ask: What is your notice period?" in r.outcomes[0].detail

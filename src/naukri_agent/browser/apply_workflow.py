@@ -223,6 +223,7 @@ class ApplyWorkflowSession:
         self._capture = _ApplyInitCapture()
         self._installed = False
         self._known: dict[str, ApplyQuestionPrompt] = {}
+        self.skipped: list[str] = []  # control ids of questions Naukri's panel never asked
 
     def _ensure_installed(self) -> None:
         if self._installed:
@@ -239,6 +240,7 @@ class ApplyWorkflowSession:
         self._capture.body = None
         self._capture.notes = []
         self._known = {}
+        self.skipped = []
 
     def click_apply(self) -> None:
         self._ensure_installed()
@@ -263,7 +265,7 @@ class ApplyWorkflowSession:
     def submit_answer(self, control_id: str, answer: str) -> None:
         known = self._known.get(control_id)
         if known is not None and known.options:
-            self._answer_choice(answer, known.options)
+            self._answer_choice(answer, known.options, control_id)
             return
         self._answer_text(answer)
 
@@ -296,11 +298,38 @@ class ApplyWorkflowSession:
             return None
         return str(html)[:300_000] if html else None
 
-    def _answer_choice(self, answer: str, options: list[str]) -> None:
-        """Pick one radio option in the question panel, then press its Save. Waits for
-        the option to be on screen (a following question appears after the previous
-        Save). Raises ApplyAnswerError, having clicked nothing, if the answer is not
-        an offered option or never appears."""
+    def _visible_option_texts(self) -> list[str]:
+        out: list[str] = []
+        for handle in self._page.query_selector_all(selectors.APPLY_CHOICE_LABEL):
+            try:
+                if handle.is_visible():
+                    out.append((handle.inner_text() or "").strip())
+            except Exception:  # noqa: BLE001 - a label mid-redraw is simply left out
+                continue
+        return out
+
+    @staticmethod
+    def _norm(text: str) -> str:
+        return " ".join((text or "").split()).casefold()
+
+    def _panel_is_asking_another_question(self, shown: list[str], control_id: str | None) -> bool:
+        """True when every option on screen belongs to ANOTHER question the app has an answer for, which means Naukri
+        moved past the one we are answering (it skips a question when an earlier answer already covered it)."""
+        on_screen = {self._norm(t) for t in shown if t}
+        if not on_screen:
+            return False
+        for cid, prompt in self._known.items():
+            if cid == control_id or not prompt.options:
+                continue
+            if on_screen <= {self._norm(o) for o in prompt.options}:
+                return True
+        return False
+
+    def _answer_choice(self, answer: str, options: list[str], control_id: str | None = None) -> None:
+        """Pick one option (radio or checkbox) in the question panel, then press its Save. Waits for the option to be on
+        screen (a following question appears after the previous Save). Raises ApplyAnswerError, having clicked nothing,
+        if the answer is not an offered option or never appears. If the panel is plainly asking a DIFFERENT question we
+        have an answer for, Naukri skipped this one: it is left unanswered, noted, and the next question is tried."""
         wanted = (answer or "").strip()
         if wanted not in options:
             raise ApplyAnswerError(f"{wanted!r} is not one of the offered options {options}")
@@ -308,7 +337,7 @@ class ApplyWorkflowSession:
         for _ in range(_CHOICE_POLL_COUNT):
             for handle in self._page.query_selector_all(selectors.APPLY_CHOICE_LABEL):
                 try:
-                    if handle.is_visible() and (handle.inner_text() or "").strip() == wanted:
+                    if handle.is_visible() and self._norm(handle.inner_text()) == self._norm(wanted):
                         label = handle
                         break
                 except Exception:  # noqa: BLE001 - a label mid-redraw is simply skipped
@@ -317,10 +346,17 @@ class ApplyWorkflowSession:
                 break
             self._page.wait_for_timeout(1000)
         if label is None:
+            if control_id is not None and self._panel_is_asking_another_question(self._visible_option_texts(), control_id):
+                logger.warning("apply_workflow: Naukri did not ask question %s; moving on to the next one", control_id)
+                self.skipped.append(control_id)
+                return
             raise ApplyAnswerError(f"option {wanted!r} did not appear in the question panel")
         label.click()
         self._page.wait_for_timeout(400)  # Save is greyed out until an option is chosen
         self._page.click(selectors.APPLY_DRAWER_SAVE)
+
+    def skipped_question_texts(self) -> list[str]:
+        return [self._known[c].question_text for c in self.skipped if c in self._known]
 
     def skip_question(self, control_id: str) -> None:
         self._page.click(selectors.APPLY_SKIP_BUTTON)

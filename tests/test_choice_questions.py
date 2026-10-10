@@ -516,3 +516,78 @@ def test_the_cli_passes_max_jobs_through(monkeypatch):
     assert CliRunner().invoke(cli_main.cli, ["telegram-apply", "--max-jobs", "3"]).exit_code == 0
     assert seen["max_attempts"] == 3
     assert CliRunner().invoke(cli_main.cli, ["telegram-apply", "--max-jobs", "0"]).exit_code != 0  # must be >= 1
+
+
+# --- checkbox questions and a question Naukri skipped (live 2026-10-10, Indium Software) ----------------------------------------
+
+
+def _two_question_body():
+    def q(qid, name, options):
+        return {"questionId": qid, "questionName": name, "questionType": "Radio Button", "isMandatory": True,
+                "answerOption": {f"newOption{i}": o for i, o in enumerate(options, 1)}}
+
+    return {"jobs": [{"questionnaire": [
+        q("11", "What is your notice period?", ["15 Days or less", "30 Days", "More than 30 days"]),
+        q("12", "Please select the city you are currently residing or willing to relocate to",
+          ["Hyderabad, Telangana", "Bengaluru, Karnataka", "Skip this question"]),
+    ]}]}
+
+
+def _two_question_session(labels):
+    page = _PanelPage(labels)
+    session = ApplyWorkflowSession(page)
+    session._capture.body = _two_question_body()
+    assert [p.control_id for p in session.list_questions()] == ["11", "12"]
+    return session, page
+
+
+def test_the_choice_selector_covers_both_radio_and_checkbox_options():
+    assert "label.ssrc__label" in selectors.APPLY_CHOICE_LABEL and "label.mcc__label" in selectors.APPLY_CHOICE_LABEL
+
+
+def test_a_checkbox_option_is_clicked_then_save():
+    hyd, blr, skip = _Label("Hyderabad, Telangana"), _Label("Bengaluru, Karnataka"), _Label("Skip this question")
+    session, page = _two_question_session([hyd, blr, skip])
+    session.submit_answer("12", "Hyderabad, Telangana")
+    assert hyd.was_clicked and not blr.was_clicked and not skip.was_clicked
+    assert page.clicked == [selectors.APPLY_DRAWER_SAVE]
+
+
+def test_a_question_naukri_skipped_is_noted_and_the_next_one_is_still_answered():
+    hyd, blr, skip = _Label("Hyderabad, Telangana"), _Label("Bengaluru, Karnataka"), _Label("Skip this question")
+    session, page = _two_question_session([hyd, blr, skip])  # the panel is asking the city, not the notice period
+    session.submit_answer("11", "15 Days or less")  # must not raise, must not click anything
+    assert page.clicked == [] and not any(h.was_clicked for h in (hyd, blr, skip))
+    assert session.skipped_question_texts() == ["What is your notice period?"]
+    session.submit_answer("12", "Bengaluru, Karnataka")
+    assert blr.was_clicked and page.clicked == [selectors.APPLY_DRAWER_SAVE]
+
+
+def test_an_option_missing_from_its_own_question_is_still_an_error_not_a_skip():
+    # the panel shows the notice-period question, but with different wording for the option we want: do not skip it
+    session, page = _two_question_session([_Label("30 Days"), _Label("More than 30 days")])
+    with pytest.raises(ApplyAnswerError, match="did not appear"):
+        session.submit_answer("11", "15 Days or less")
+    assert session.skipped_question_texts() == [] and page.clicked == []
+
+
+def test_options_that_match_nothing_we_know_are_an_error_not_a_skip():
+    session, _page = _two_question_session([_Label("Something unrelated"), _Label("Another")])
+    with pytest.raises(ApplyAnswerError, match="did not appear"):
+        session.submit_answer("11", "15 Days or less")
+    assert session.skipped_question_texts() == []
+
+
+def test_extra_spaces_and_case_in_the_panels_label_still_match():
+    odd = _Label("  15  days OR less ")
+    session, page = _two_question_session([odd, _Label("30 Days")])
+    session.submit_answer("11", "15 Days or less")
+    assert odd.was_clicked and page.clicked == [selectors.APPLY_DRAWER_SAVE]
+
+
+def test_a_new_application_forgets_the_previous_ones_skipped_questions():
+    session, _ = _two_question_session([_Label("Hyderabad, Telangana")])
+    session.submit_answer("11", "15 Days or less")
+    assert session.skipped
+    session.reset_capture()
+    assert session.skipped == []

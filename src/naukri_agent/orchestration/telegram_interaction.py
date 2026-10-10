@@ -116,6 +116,15 @@ class TelegramInteraction:
             return None
         if reply == ACCEPT_SUGGESTION and suggestion:
             return suggestion
+        if reply == ACCEPT_SUGGESTION:
+            # "." only means "use the suggestion", and there is none: never send a full stop to a recruiter as an answer.
+            reply = self._ch.ask_text(
+                f"There is no suggestion for this question, so \"{ACCEPT_SUGGESTION}\" cannot be used. Type your answer "
+                f"(or send {STOP_WORD} to give up on this job).",
+                self._answer_s,
+            )
+            if reply is None or reply.lower() == STOP_WORD or reply == ACCEPT_SUGGESTION:
+                return None
         return reply
 
     def confirm_submit(self, job: dict, questions: list[str], answers: list[str]) -> bool | None:

@@ -391,6 +391,9 @@ def run_auto_apply(
                     # reloading logged two finished applications as "unconfirmed". So always
                     # confirm from Naukri's own page state (reloading once if needed).
                     submission = client.confirm_application_after_answers(job["url"])
+                    skipped = list(getattr(client, "skipped_questions", lambda: [])())
+                    if skipped:  # Naukri did not ask these, so nothing was sent for them; say so
+                        submission.notes.append("Naukri did not ask: " + "; ".join(q[:80] for q in skipped))
                     client.screenshot(shots / f"{attempt_id}_after_submit.png")
 
                     if not submission.submitted:

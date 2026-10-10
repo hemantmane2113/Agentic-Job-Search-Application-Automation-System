@@ -12,7 +12,7 @@ from sqlalchemy.exc import OperationalError
 
 from naukri_agent.config import Settings
 from naukri_agent.database.base import session_scope
-from naukri_agent.database.models import ApplicationEvent, ApplicationHistory, ApplicationStatus, FollowupPrompt
+from naukri_agent.database.models import ApplicationEvent, ApplicationHistory, ApplicationStatus, FollowupPrompt, Job
 from naukri_agent.database.repositories import (
     LABEL_APPLIED_COMPANY,
     LABEL_APPLIED_DIRECTLY,
@@ -539,3 +539,15 @@ def test_one_command_that_blows_up_does_not_end_phone_control(tmp_path):
                    sleep=sleeps.append, lock_held=lambda p: False, followup=boom)
     lis.run(should_stop=lambda: ch.polls >= 3)
     assert ch.polls >= 3 and sleeps  # it carried on after the failure
+
+
+def test_a_naukri_apply_job_you_applied_to_by_hand_is_labelled_applied_directly():
+    """Live 2026-10-10: Straive and Dash Ast were applied to by hand on Naukri; they are not company-website applications."""
+    with session_scope(in_memory_factory()) as s:
+        a, b, *_ = seed(s, 3)
+        s.get(Job, a).apply_type = "native"
+        native_row, _ = upsert_application_history(s, a, source="manual_naukri")
+        company_row, _ = upsert_application_history(s, b)  # b is a company-website job
+        assert native_row.apply_label == LABEL_APPLIED_DIRECTLY and company_row.apply_label == LABEL_APPLIED_COMPANY
+    assert derive_apply_label(ApplicationStatus.APPLIED, "manual_cli", "native") == LABEL_APPLIED_DIRECTLY
+    assert derive_apply_label(ApplicationStatus.APPLIED, "manual_cli", "company_site") == LABEL_APPLIED_COMPANY

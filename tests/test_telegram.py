@@ -200,10 +200,19 @@ def test_question_dot_accepts_the_suggestion_and_own_text_overrides_it():
     assert interaction(w2).ask_question(1, 1, "Notice period?", "Immediate") == "15 days"
 
 
-def test_question_without_a_suggestion_says_so_and_dot_is_just_an_answer():
-    w = World([[], [text(".")]])
-    assert interaction(w).ask_question(1, 1, "Current CTC?", None) == "."
-    assert "no answer for this one" in w.sent()[0]["text"]
+def test_question_without_a_suggestion_says_so_and_a_lone_dot_is_not_sent_as_the_answer():
+    """Live 2026-10-10 (Dash Ast): a '.' with no suggestion to accept was stored as the answer, 'Are you currently
+    residing in Bengaluru? A: .' It must ask again instead."""
+    w = World([[], [text(".")], [], [text("Yes")]])
+    assert interaction(w).ask_question(1, 1, "Are you residing in Bengaluru?", None) == "Yes"
+    sent = [p["text"] for p in w.sent()]
+    assert "no answer for this one" in sent[0] and "cannot be used" in sent[1]
+
+
+def test_a_second_dot_or_a_stop_or_silence_after_that_gives_up_on_the_job():
+    assert interaction(World([[], [text(".")], [], [text(".")]])).ask_question(1, 1, "Q?", None) is None
+    assert interaction(World([[], [text(".")], [], [text("/stop")]])).ask_question(1, 1, "Q?", None) is None
+    assert interaction(World([[], [text(".")]])).ask_question(1, 1, "Q?", None) is None
 
 
 def test_stop_and_silence_both_give_up_on_a_question():

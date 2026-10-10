@@ -534,11 +534,14 @@ LABEL_NOT_APPLIED = "not applied"
 LABEL_IGNORED = "ignored"
 
 
-def derive_apply_label(status: ApplicationStatus, source: str | None) -> str | None:
+def derive_apply_label(status: ApplicationStatus, source: str | None, apply_type: str | None = None) -> str | None:
     """The plain-words label for a status, or None when the status does not change it (interview, offer...)."""
     if status == ApplicationStatus.APPLIED:
-        # the app applied on Naukri itself after your Yes -> "directly"; everything you did yourself -> company website
-        return LABEL_APPLIED_DIRECTLY if (source or "").startswith("agent_auto_apply") else LABEL_APPLIED_COMPANY
+        # applied on Naukri itself, by the app after your Yes or by you on a Naukri Apply job -> "directly";
+        # applied on the employer's own site -> "through company website"
+        if (source or "").startswith("agent_auto_apply") or apply_type == "native":
+            return LABEL_APPLIED_DIRECTLY
+        return LABEL_APPLIED_COMPANY
     if status == ApplicationStatus.NOT_APPLYING:
         return LABEL_NOT_APPLIED
     if status == ApplicationStatus.IGNORED:
@@ -603,7 +606,7 @@ def upsert_application_history(
             resume_file_hash=resume_file_hash,
             source=source,
             notes=note,
-            apply_label=apply_label or derive_apply_label(status, source),
+            apply_label=apply_label or derive_apply_label(status, source, job.apply_type if job else None),
         )
         session.add(row)
         session.flush()
@@ -632,7 +635,7 @@ def upsert_application_history(
     if note is not None:
         existing.notes = note
     existing.source = source
-    new_label = apply_label or derive_apply_label(status, source)
+    new_label = apply_label or derive_apply_label(status, source, job.apply_type if job else None)
     if new_label:
         existing.apply_label = new_label
     existing.updated_at = now

@@ -186,6 +186,10 @@ class NaukriClient(JobBoardClient):
         except Exception:  # noqa: BLE001 - diagnostics must never hide the real error
             pass
 
+    def skipped_questions(self) -> list[str]:
+        """Questions the app had an answer for that Naukri's panel never asked, for this application."""
+        return self._get_apply_session().skipped_question_texts()
+
     def confirm_application_after_answers(self, job_url: str) -> ApplySubmissionResult:
         return self._get_apply_session().confirm_applied_after_save(job_url)
 
