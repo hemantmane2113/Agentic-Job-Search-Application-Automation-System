@@ -1,0 +1,260 @@
+"""
+Telegram as the human-in-the-loop channel: the app asks, the user answers on
+their phone.
+
+Uses the official Bot API over HTTPS long-polling (getUpdates), so it works
+from a home PC with no public address, no webhook and no extra dependency.
+
+Safety properties, each covered by tests:
+  * Only messages from the ONE configured chat id are ever acted on; anyone
+    else who finds the bot is ignored.
+  * Stale messages are drained before every prompt, so an old "y" can never
+    answer a new question.
+  * No reply in time returns None -- callers must treat silence as "no".
+  * The bot token appears only inside the default transport's URL. Errors are
+    reported by exception TYPE only, and the token is never logged.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import ssl
+import time
+import urllib.error
+import urllib.request
+from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
+
+_POLL_SECONDS = 25
+_WAIT_RETRY_PAUSE_S = 2  # a dropped connection while waiting for your tap: pause this long, then listen again
+_WAIT_MAX_CONSECUTIVE_ERRORS = 30  # only a connection that stays down for this many tries in a row ends the wait
+_YES = {"y", "yes", "ok", "apply", "go", "yep"}
+_NO = {"n", "no", "skip", "stop", "nope"}
+
+Transport = Callable[[str, dict, float], dict]
+
+
+class TelegramError(Exception):
+    """A Telegram call failed. The message holds only the error TYPE, never the URL or token."""
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Verifying context backed by certifi's CA bundle. Python on Windows only trusts
+    the roots Windows happens to have installed, and a PC that has never needed
+    GoDaddy's root (Telegram's CA) fails with "self-signed certificate in
+    certificate chain" even though nothing is wrong. Certificate checking stays ON;
+    only the list of trusted roots is the standard, complete one."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 - fall back to the system store
+        return ssl.create_default_context()
+
+
+def http_transport(token: str) -> Transport:
+    ctx = _ssl_context()
+
+    def call(method: str, params: dict, timeout: float) -> dict:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/{method}",
+            data=json.dumps(params).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:  # 401/404 here means the token was rejected
+            raise TelegramError(f"{method} failed: HTTP {exc.code}") from None
+        except urllib.error.URLError as exc:
+            # the reason's TYPE (e.g. SSLCertVerificationError, gaierror) is safe; its text could echo the URL
+            raise TelegramError(f"{method} failed: URLError/{type(exc.reason).__name__}") from None
+        except Exception as exc:  # noqa: BLE001 - the URL (and token) must never leak via str(exc)
+            raise TelegramError(f"{method} failed: {type(exc).__name__}") from None
+
+    return call
+
+
+class TelegramChannel:
+    def __init__(
+        self,
+        token: str,
+        chat_id: str,
+        *,
+        transport: Transport | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._chat_id = str(chat_id)
+        self._transport = transport or http_transport(token)
+        self._clock = clock
+        self._sleep = sleep
+        self._offset: int | None = None
+
+    # --- sending -----------------------------------------------------------------
+
+    def send(self, text: str, *, yes_no: bool = False) -> None:
+        params: dict[str, Any] = {"chat_id": self._chat_id, "text": text[:4000], "disable_web_page_preview": True}
+        if yes_no:
+            params["reply_markup"] = {
+                "inline_keyboard": [[{"text": "Yes", "callback_data": "y"}, {"text": "No", "callback_data": "n"}]]
+            }
+        self._transport("sendMessage", params, 30)
+
+    # --- receiving ---------------------------------------------------------------
+
+    def _poll(self, seconds: int) -> list[dict]:
+        params: dict[str, Any] = {"timeout": seconds, "allowed_updates": ["message", "callback_query"]}
+        if self._offset is not None:
+            params["offset"] = self._offset
+        data = self._transport("getUpdates", params, seconds + 10)
+        updates = data.get("result") or []
+        for u in updates:
+            self._offset = max(self._offset or 0, int(u["update_id"]) + 1)
+        return updates
+
+    def _own_chat(self, update: dict) -> tuple[str, str | None] | None:
+        """(kind, value) if the update is from OUR chat, else None. kind: 'text' | 'button'."""
+        msg = update.get("message")
+        if msg and str(msg.get("chat", {}).get("id")) == self._chat_id and msg.get("text") is not None:
+            return "text", str(msg["text"]).strip()
+        cb = update.get("callback_query")
+        if cb and str(cb.get("message", {}).get("chat", {}).get("id")) == self._chat_id:
+            try:
+                self._transport("answerCallbackQuery", {"callback_query_id": cb.get("id")}, 10)
+            except TelegramError:
+                pass
+            return "button", str(cb.get("data") or "")
+        return None
+
+    def poll_commands(self, seconds: int) -> list[tuple[str, int | None]]:
+        """Typed messages from OUR chat as (text, sent-at epoch seconds). Button taps and other chats are ignored.
+        For the phone listener, which waits for "/apply" between runs."""
+        out: list[tuple[str, int | None]] = []
+        for update in self._poll(seconds):
+            cb = update.get("callback_query")
+            if cb and str(cb.get("message", {}).get("chat", {}).get("id")) == self._chat_id:
+                # A button tapped on a question that is no longer being waited on (it timed out, or the bot restarted).
+                # Say so, instead of leaving the button spinning as if it did something.
+                try:
+                    self._transport(
+                        "answerCallbackQuery",
+                        {"callback_query_id": cb.get("id"), "show_alert": True,
+                         "text": "That question has expired. Send /applied (or /apply) to start again."},
+                        10,
+                    )
+                except TelegramError:
+                    pass
+                continue
+            msg = update.get("message")
+            if msg and str(msg.get("chat", {}).get("id")) == self._chat_id and msg.get("text"):
+                date = msg.get("date")
+                out.append((str(msg["text"]).strip(), int(date) if date is not None else None))
+        return out
+
+    def drain(self) -> None:
+        """Discard everything already waiting, so only replies to the NEXT prompt are read."""
+        while self._poll(0):
+            pass
+
+    def _wait(self, timeout_s: float, accept: Callable[[str, str], Any]) -> Any:
+        deadline = self._clock() + timeout_s
+        errors = 0
+        while self._clock() < deadline:
+            remaining = deadline - self._clock()
+            try:
+                updates = self._poll(min(_POLL_SECONDS, max(1, int(remaining))))
+            except TelegramError:
+                # A dropped or slow connection must not throw away the question you are in the middle of answering.
+                # Nothing was consumed (the offset only moves after a good reply), so just listen again.
+                errors += 1
+                if errors >= _WAIT_MAX_CONSECUTIVE_ERRORS:
+                    raise
+                self._sleep(_WAIT_RETRY_PAUSE_S)
+                continue
+            errors = 0
+            for update in updates:
+                got = self._own_chat(update)
+                if got is None:
+                    continue
+                result = accept(*got)
+                if result is not None:
+                    return result
+        return None
+
+    def ask_yes_no(self, text: str, timeout_s: float) -> bool | None:
+        self.send_yes_no(text)
+        return self.wait_yes_no(timeout_s)
+
+    def send_yes_no(self, text: str) -> None:
+        """Ask now; read the answer later with wait_yes_no(). Anything already waiting is
+        discarded first, so an old reply can never answer this prompt. Replies sent while
+        the caller is busy are kept by Telegram and are read as soon as wait_yes_no() runs."""
+        self.drain()
+        self.send(text, yes_no=True)
+
+    def wait_yes_no(self, timeout_s: float) -> bool | None:
+        """True / False, or None if no clear answer arrived in time."""
+        warned = []
+
+        def accept(kind: str, value: str) -> bool | None:
+            v = value.lower()
+            if v in _YES:
+                return True
+            if v in _NO:
+                return False
+            if not warned:
+                warned.append(1)
+                self.send("Please answer Yes or No (tap a button, or type y / n).")
+            return None
+
+        return self._wait(timeout_s, accept)
+
+    def ask_text(self, text: str, timeout_s: float) -> str | None:
+        """The user's next typed message, or None if nothing arrived in time."""
+        self.drain()
+        self.send(text)
+        return self._wait(timeout_s, lambda kind, value: value if kind == "text" and value else None)
+
+    def ask_choice(self, text: str, options: list[str], timeout_s: float) -> str | None:
+        """Send the options as tappable buttons; returns the chosen option exactly as
+        listed (a tap, or the option typed in any case), "/stop" if the user typed
+        that, or None on silence."""
+        self.drain()
+        keyboard = [[{"text": opt[:60], "callback_data": f"opt:{i}"}] for i, opt in enumerate(options)]
+        self._transport(
+            "sendMessage",
+            {"chat_id": self._chat_id, "text": text[:4000], "disable_web_page_preview": True,
+             "reply_markup": {"inline_keyboard": keyboard}},
+            30,
+        )
+
+        def accept(kind: str, value: str) -> str | None:
+            if kind == "button" and value.startswith("opt:"):
+                try:
+                    return options[int(value[4:])]
+                except (ValueError, IndexError):
+                    return None
+            if kind == "text":
+                low = value.strip().lower()
+                if low == "/stop":
+                    return "/stop"
+                for opt in options:
+                    if low == opt.lower():
+                        return opt
+            return None
+
+        return self._wait(timeout_s, accept)
+
+    def discover_chat_id(self, timeout_s: float) -> str | None:
+        """Setup helper: the chat id of the first person to message the bot."""
+        deadline = self._clock() + timeout_s
+        while self._clock() < deadline:
+            for update in self._poll(min(_POLL_SECONDS, max(1, int(deadline - self._clock())))):
+                chat = (update.get("message") or {}).get("chat") or {}
+                if chat.get("id") is not None:
+                    return str(chat["id"])
+        return None

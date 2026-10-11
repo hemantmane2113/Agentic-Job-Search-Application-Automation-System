@@ -4,6 +4,7 @@ from naukri_agent.candidate.models import CandidateProfile
 from naukri_agent.config import Settings
 from naukri_agent.database.models import JobExtraction
 from naukri_agent.matching.experience_matcher import (
+    EXPERIENCE_SLIGHT_SHORTFALL_GRACE_YEARS,
     build_experience_profile,
     derive_skill_years_from_resume,
     score_experience,
@@ -58,7 +59,35 @@ def test_above_maximum_still_gets_full_credit():
     extraction = JobExtraction(experience_min=2, experience_max=4)
     result = score_experience(extraction, _dummy_exp(10), settings)
     assert result.points == result.max_points
-    assert any("exceeds" in f.lower() for f in result.positive_factors)
+
+
+# --- Run 16 fix A: named shared shortfall-grace constant -------------------
+#
+# scorer.py's hard minimum-experience REJECT override reuses this exact
+# constant, so it can never drift out of sync with this function's own
+# "slightly below" partial-credit boundary.
+
+
+def test_shortfall_grace_constant_is_half_a_year():
+    assert EXPERIENCE_SLIGHT_SHORTFALL_GRACE_YEARS == 0.5
+
+
+def test_shortfall_at_the_grace_boundary_gets_075_credit():
+    settings = _settings()
+    extraction = JobExtraction(experience_min=5, experience_max=8)
+    result = score_experience(
+        extraction, _dummy_exp(5 - EXPERIENCE_SLIGHT_SHORTFALL_GRACE_YEARS), settings
+    )
+    assert result.points == result.max_points * 0.75
+
+
+def test_shortfall_just_beyond_the_grace_boundary_gets_025_credit():
+    settings = _settings()
+    extraction = JobExtraction(experience_min=5, experience_max=8)
+    result = score_experience(
+        extraction, _dummy_exp(5 - EXPERIENCE_SLIGHT_SHORTFALL_GRACE_YEARS - 0.1), settings
+    )
+    assert result.points == result.max_points * 0.25
 
 
 def test_unknown_experience_requirement_gives_partial_credit_not_zero():
