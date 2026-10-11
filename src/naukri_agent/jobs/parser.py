@@ -68,6 +68,41 @@ logger = logging.getLogger(__name__)
 # truncate-and-send: the full JD is never sent to the model.
 MAX_JD_CHARS_FOR_LLM = 8000
 
+# Some postings arrive with their whole text pasted twice (seen 2026-10-11: Jet2's 15,671-char JD was one 7,851-char
+# posting followed by an identical copy). Before giving up on a JD that is too long, repeated lines are dropped,
+# keeping the first copy of each. Only whole lines of at least this many characters count as repeats, so short
+# structural lines ("Skills", "o  Python") are never touched, and nothing is rewritten or summarised: what is left is
+# exactly what the posting said, once. The stored description is not changed; only the text sent to the model is.
+# A line must be at least this long to be the FIRST sign of a second copy (a short line like "Skills" repeats by
+# chance in an honest posting). Once a long line has repeated, we are inside the second copy, and from there any
+# line already seen is dropped too, short bullets included; a line not seen before is always kept.
+_MIN_REPEATED_LINE_CHARS = 25
+
+
+def drop_repeated_lines(text: str) -> str:
+    seen: set[str] = set()
+    kept: list[str] = []
+    in_second_copy = False
+    for line in (text or "").split("\n"):
+        key = " ".join(line.split()).casefold()
+        if key and key in seen and (in_second_copy or len(key) >= _MIN_REPEATED_LINE_CHARS):
+            in_second_copy = True
+            continue
+        if key:
+            seen.add(key)
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def description_for_llm(description: str | None) -> str | None:
+    """The job description as it will be sent to the model, or None when it is too long to send even after repeated
+    lines are dropped (such a job is reported as a parse failure, as before). Deterministic; no LLM, no network."""
+    text = description or ""
+    if len(text) <= MAX_JD_CHARS_FOR_LLM:
+        return text
+    shortened = drop_repeated_lines(text)
+    return shortened if len(shortened) <= MAX_JD_CHARS_FOR_LLM else None
+
 
 # --- Deterministic job_type normalisation (Run 8, Run 9) ------------------
 #
@@ -647,13 +682,15 @@ Classification rules — be conservative:
 """
 
 
-def build_user_prompt(job: Job) -> str:
+def build_user_prompt(job: Job, description: str | None = None) -> str:
     """
     Build the user message. The untrusted description is wrapped in
     explicit delimiters so the model (and a human auditor reading the
     raw prompt later) can clearly see where untrusted data starts and
-    ends.
+    ends. `description` replaces job.description when the caller has
+    already shortened it (see description_for_llm).
     """
+    body = job.description if description is None else description
     return f"""<job_description>
 Title: {job.title}
 Company: {job.company}
@@ -661,7 +698,7 @@ Location: {job.location}
 Raw salary text: {job.salary_text or "N/A"}
 Raw experience text: {job.experience_text or "N/A"}
 
-{job.description}
+{body}
 </job_description>
 
 Return only the JSON object described in the system instructions. Do not include any text before or after the JSON object."""
@@ -719,7 +756,13 @@ class JobParser:
         looping over many jobs can continue past a single bad one.
         """
         jd_len = len(job.description or "")
-        if jd_len > MAX_JD_CHARS_FOR_LLM:
+        sendable = description_for_llm(job.description)
+        if sendable is not None and jd_len > MAX_JD_CHARS_FOR_LLM:
+            logger.info(
+                "JobParser: job %s repeats its own text; sending it once (%d -> %d chars)",
+                job.url, jd_len, len(sendable),
+            )
+        if sendable is None:
             logger.warning(
                 "JobParser: skipping LLM call for job %s -- description too long "
                 "(%d chars > %d limit)",
@@ -729,7 +772,7 @@ class JobParser:
             )
             return JobParseResult(success=False, error=f"jd_too_long:{jd_len}")
 
-        user_prompt = build_user_prompt(job)
+        user_prompt = build_user_prompt(job, sendable)
 
         try:
             raw_response = self.provider.complete(SYSTEM_PROMPT, user_prompt, json_mode=True)

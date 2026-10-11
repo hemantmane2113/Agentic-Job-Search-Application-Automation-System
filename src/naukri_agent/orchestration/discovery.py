@@ -181,11 +181,73 @@ def build_query_matrix(profile: CandidateProfile, settings: Settings) -> list[Di
     return matrix
 
 
-def _freshness_pass(lanes_by_role, posted_by_url, settings):
+_LOOKUP_CHUNK = 400  # keeps each database query well under SQLite's variable limit
+
+
+def _settled_among(session: Session, urls: list[str]) -> set[str]:
+    """
+    Which of these search-card addresses are jobs we have ALREADY read and have nothing more to learn from: the job is
+    in the database (matched the way upsert_job matches: Naukri's job number, else the exact address) AND it either
+    has a successful extraction or can never get one (its text is too long to send to the model even once repeated
+    lines are dropped). A job that is in the database but failed to parse, like Jet2 did, is NOT settled, so it is read
+    again. Read-only; no network.
+    """
+    from naukri_agent.database.models import Job, JobExtraction
+    from naukri_agent.jobs.models import extract_external_id
+    from naukri_agent.jobs.parser import description_for_llm
+
+    by_ext: dict[str, list[str]] = {}
+    by_url: dict[str, list[str]] = {}
+    for u in urls:
+        ext = extract_external_id(u)
+        if ext:
+            by_ext.setdefault(ext, []).append(u)
+        by_url.setdefault(u, []).append(u)
+
+    rows: dict[int, Job] = {}
+    ext_keys, url_keys = list(by_ext), list(by_url)
+    for i in range(0, len(ext_keys), _LOOKUP_CHUNK):
+        for job in session.query(Job).filter(Job.external_id.in_(ext_keys[i : i + _LOOKUP_CHUNK])):
+            rows[job.id] = job
+    for i in range(0, len(url_keys), _LOOKUP_CHUNK):
+        for job in session.query(Job).filter(Job.url.in_(url_keys[i : i + _LOOKUP_CHUNK])):
+            rows[job.id] = job
+    if not rows:
+        return set()
+
+    parsed_ids: set[int] = set()
+    ids = list(rows)
+    for i in range(0, len(ids), _LOOKUP_CHUNK):
+        parsed_ids.update(
+            jid for (jid,) in session.query(JobExtraction.job_id).filter(
+                JobExtraction.is_current.is_(True), JobExtraction.job_id.in_(ids[i : i + _LOOKUP_CHUNK])
+            )
+        )
+
+    settled: set[str] = set()
+    for jid, job in rows.items():
+        if jid in parsed_ids or description_for_llm(job.description) is None:
+            settled.update(by_ext.get(job.external_id or "", ()))
+            settled.update(by_url.get(job.url, ()))
+    return settled
+
+
+def _select_unseen_first(aged, limit: int, settled):
+    """The day's jobs: every group's unseen jobs first (freshest first, groups taking equal turns), and only if
+    that leaves slots, jobs already read before, chosen the same way. With nothing settled this is _fair_select."""
+    unseen = [a for a in aged if a[1] not in settled]
+    chosen = _fair_select(unseen, limit)
+    if len(chosen) < limit:
+        chosen += _fair_select([a for a in aged if a[1] in settled], limit - len(chosen))
+    return chosen
+
+
+def _freshness_pass(lanes_by_role, posted_by_url, settings, settled=frozenset()):
     """
     De-dup the cards found so far (every group taking equal turns), apply the discovery ceiling and the freshness
     window, and pick the day's jobs. Returns (fair_cards, aged, unknown_excluded, stale_excluded, chosen).
-    Absent or unparseable posted labels are EXCLUDED, never assumed fresh.
+    Absent or unparseable posted labels are EXCLUDED, never assumed fresh. `settled` = addresses already read and
+    parsed; with discovery_prefer_unseen the unseen jobs are taken before them.
     """
     fair_cards = _fair_card_order(lanes_by_role)
     considered = fair_cards[: settings.discovery_max_total_jobs]
@@ -201,12 +263,20 @@ def _freshness_pass(lanes_by_role, posted_by_url, settings):
             stale += 1
             continue
         aged.append((role, u, age))
-    chosen = _fair_select(aged, settings.discovery_fresh_job_limit)
+    if settings.discovery_prefer_unseen:
+        chosen = _select_unseen_first(aged, settings.discovery_fresh_job_limit, settled)
+    else:
+        chosen = _fair_select(aged, settings.discovery_fresh_job_limit)
     return fair_cards, aged, unknown, stale, chosen
 
 
-def _have_enough(aged, chosen, group_ids, settings) -> bool:
-    """The day's quota is filled AND every resume group holds its equal share of it."""
+def _have_enough(aged, chosen, group_ids, settings, settled=frozenset()) -> bool:
+    """The day's quota is filled AND every resume group holds its equal share of it. With discovery_prefer_unseen
+    only jobs not read before count toward that, so searching goes on until there are enough NEW jobs (or the
+    search cap in discover_and_store is reached)."""
+    if settings.discovery_prefer_unseen:
+        aged = [a for a in aged if a[1] not in settled]
+        chosen = _fair_select(aged, settings.discovery_fresh_job_limit)
     if len(chosen) < settings.discovery_fresh_job_limit:
         return False
     need = settings.discovery_fresh_job_limit // max(1, len(group_ids))
@@ -239,6 +309,9 @@ def discover_and_store(
     # url -> raw search-card posted-date label (first sighting wins, so
     # this mirrors the URL-dedup "first occurrence wins" rule below).
     posted_by_url: dict[str, str | None] = {}
+    settled: set[str] = set()  # cards already read and parsed on an earlier day (see _settled_among)
+    checked: set[str] = set()
+    search_cap_hit = False
 
     for q in matrix:
         queries_run += 1
@@ -262,6 +335,10 @@ def discover_and_store(
         lanes_by_role.setdefault(groups.get(q.role.strip().lower(), q.role), []).append([s.url for s in picked])
         for s in picked:
             posted_by_url.setdefault(s.url, s.posted_text)
+        if settings.discovery_prefer_unseen:
+            new_urls = [s.url for s in picked if s.url not in checked]
+            checked.update(new_urls)
+            settled |= _settled_among(session, new_urls)
         seq += 1
         add_run_event(
             session,
@@ -272,15 +349,19 @@ def discover_and_store(
             detail={"query": f"{q.role} @ {q.location}", "results": len(picked)},
         )
         if stop_when_enough:
-            _fc, aged_now, _u, _s, chosen_now = _freshness_pass(lanes_by_role, posted_by_url, settings)
-            if _have_enough(aged_now, chosen_now, set(groups.values()) | set(lanes_by_role), settings):
+            _fc, aged_now, _u, _s, chosen_now = _freshness_pass(lanes_by_role, posted_by_url, settings, settled)
+            if _have_enough(aged_now, chosen_now, set(groups.values()) | set(lanes_by_role), settings, settled):
                 stopped_early = queries_run < len(matrix)
+                break
+            # Looking for NEW jobs can go on for a long time when few are posted, so searching has a limit too.
+            if settings.discovery_max_searches and queries_run >= settings.discovery_max_searches:
+                stopped_early = search_cap_hit = queries_run < len(matrix)
                 break
 
     # de-dup, in an order where every GROUP (= resume) takes equal turns (so neither the ceiling nor the daily
     # cap below can drop the last roles in the list), then apply the hard discovery ceiling.
     fair_cards, aged, unknown_freshness, stale_excluded, chosen = _freshness_pass(
-        lanes_by_role, posted_by_url, settings
+        lanes_by_role, posted_by_url, settings, settled
     )
     discovered_card_count = len(fair_cards)
     window_days = settings.discovery_freshness_days
@@ -301,6 +382,10 @@ def discover_and_store(
             "unknown_excluded": unknown_freshness,
             "fresh_cap": settings.discovery_fresh_job_limit,
             "selected": len(fresh_capped),
+            "unseen_in_window": sum(1 for a in aged if a[1] not in settled),
+            "selected_unseen": sum(1 for _r, u in chosen if u not in settled),
+            "selected_already_read": sum(1 for _r, u in chosen if u in settled),
+            "search_cap_hit": search_cap_hit,
             "searches_run": queries_run,
             "searches_planned": len(matrix),
             "stopped_early": stopped_early,

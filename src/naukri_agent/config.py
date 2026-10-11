@@ -305,6 +305,12 @@ class Settings(BaseSettings):
     # matches can be found without the V1 175-200-job / multi-hour parse.
     discovery_freshness_days: int = 7
     discovery_fresh_job_limit: int = 50
+    # True (default): the day's jobs are the ones not read before, freshest first; jobs already read and parsed on an
+    # earlier day only fill whatever is left. Searching continues until there are enough NEW jobs, but never past
+    # discovery_max_searches searches (0 = no limit), so a quiet day does not walk every city. False: the old
+    # behaviour, the freshest jobs whether or not they were read before.
+    discovery_prefer_unseen: bool = True
+    discovery_max_searches: int = 24
 
     # --- Manual application recording ---
     mark_applied_default_status: str = "APPLIED"

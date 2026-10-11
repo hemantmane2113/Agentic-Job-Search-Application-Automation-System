@@ -295,10 +295,12 @@ def test_freshness_runevent_detail_has_all_diagnostic_fields(tmp_path):
     assert set(detail) == {
         "discovered_cards", "window_days", "within_window",
         "stale_excluded", "unknown_excluded", "fresh_cap", "selected",
+        "unseen_in_window", "selected_unseen", "selected_already_read", "search_cap_hit",
         "searches_run", "searches_planned", "stopped_early",
     }
     assert detail == {
         "discovered_cards": 4, "window_days": 7, "within_window": 2,
         "stale_excluded": 1, "unknown_excluded": 1, "fresh_cap": 60, "selected": 2,
+        "unseen_in_window": 2, "selected_unseen": 2, "selected_already_read": 0, "search_cap_hit": False,
         "searches_run": 1, "searches_planned": 1, "stopped_early": False,
     }

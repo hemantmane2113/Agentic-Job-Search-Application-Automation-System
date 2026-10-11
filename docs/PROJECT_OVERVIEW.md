@@ -83,8 +83,8 @@ src/naukri_agent/
 ### The daily flow
 
 ```
-Naukri search (role-only searches first, then cities, stop at 50 fresh jobs) ─▶ open and read each job (read-only;
-keeps the employer's direct link) ─▶ JobParser (LLM, extract only) ─▶ score_job() (plain code) ─▶ select_resume()
+Naukri search (role-only searches first, then cities, until 50 jobs NOT READ BEFORE are found, at most 24 searches;
+jobs already read and parsed only fill what is left) ─▶ open and read each job (read-only; keeps the employer's direct link) ─▶ JobParser (LLM, extract only) ─▶ score_job() (plain code) ─▶ select_resume()
 ─▶ build_digest(): ≥80, ≤10, company-website jobs = Part 1, last day's apps = Part 2, recent company-site jobs = Part 3
 ─▶ email · Excel mirror · Telegram ping (up to 4 Naukri Apply jobs ready) ─▶ research email (10:05 task)
 ```
@@ -156,7 +156,7 @@ free tier. Careers pages that show no text to an automated reader are flagged, a
 
 Three tiers, kept separate: unit tests (pure logic), mocked-browser tests (`tests/browser_fakes.py`, no real browser or network),
 and manual tests in `tests/manual/` that need a real Naukri account (`pytest -m manual`, excluded by default). Currently
-**1599 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
+**1610 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
 confirm is called out as UNVERIFIED in `selectors.py` until a real run proves it.
 
 ---

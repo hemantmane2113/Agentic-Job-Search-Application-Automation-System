@@ -81,7 +81,7 @@ docs/                            PROJECT_OVERVIEW.md and the architecture/workfl
 ## Testing
 
 Three tiers: unit; mocked-browser (`test_browser_*.py`, no real browser); manual (`pytest -m manual`, excluded by default). Run
-`pytest` before calling a change done. Currently **1599 passed, 3 deselected**. A fix for a live bug gets a test built from the
+`pytest` before calling a change done. Currently **1610 passed, 3 deselected**. A fix for a live bug gets a test built from the
 real shape that failed (see `tests/test_choice_questions.py` for the Indium panel).
 
 ## Working style the user expects
