@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from naukri_agent.config import Settings
+from naukri_agent.safe_error import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,7 @@ def run_profile_refresh(
         return ProfileRefreshResult(outcome="needs_human", resume_id=entry.id, detail=type(exc).__name__)
     except Exception as exc:  # noqa: BLE001 - any surprise: record the type only and stop
         name = type(exc).__name__
+        logger.error("profile refresh failed: %s", safe_error_text(exc, settings))  # log file only
         record("failed", name)
         say(f"Profile refresh failed ({name}); nothing was changed on your profile.")
         return ProfileRefreshResult(outcome="failed", resume_id=entry.id, detail=name)

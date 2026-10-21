@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from naukri_agent.config import Settings
+from naukri_agent.safe_error import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,24 @@ class BrowserManager:
         # then also covers popup windows the page may open.
         self.context: Any = None
         self.page: Any = None
+        self._lock_path: Path | None = None  # set while this manager holds the shared-profile lock
+
+    def _take_profile_lock(self) -> None:
+        """Wait for any other command using the shared Naukri profile to finish (see browser/profile_lock.py). Not used
+        for a disposable profile (profile_dir_override), which nobody else can be using."""
+        if self._profile_dir_override is not None or not self.settings.browser_lock_enabled:
+            return
+        from naukri_agent.browser import profile_lock
+
+        profile_lock.acquire(self.settings.browser_lock_file, self.settings.browser_lock_wait_minutes * 60)
+        self._lock_path = self.settings.browser_lock_file
+
+    def _release_profile_lock(self) -> None:
+        path, self._lock_path = self._lock_path, None
+        if path is not None:
+            from naukri_agent.browser import profile_lock
+
+            profile_lock.release(path)
 
     def __enter__(self) -> "BrowserManager":
         self.launch()
@@ -64,13 +83,20 @@ class BrowserManager:
             profile_dir,
         )
 
-        self._playwright = sync_playwright().start()
-        self._context = self._playwright.chromium.launch_persistent_context(
-            user_data_dir=str(profile_dir),
-            headless=self.settings.naukri_headless,
-        )
-        self.context = self._context
-        self.page = self._context.new_page()
+        self._take_profile_lock()
+        try:
+            self._playwright = sync_playwright().start()
+            self._context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=self.settings.naukri_headless,
+            )
+            self.context = self._context
+            self.page = self._context.new_page()
+        except Exception as exc:
+            # The error type alone ("Error") left a failed launch undiagnosable; the LOG FILE gets a scrubbed first line.
+            logger.error("browser launch failed: %s", safe_error_text(exc, self.settings))
+            self.close()  # also lets go of the profile lock, so the next command is not kept waiting
+            raise
         return self.page
 
     def close(self) -> None:
@@ -89,6 +115,10 @@ class BrowserManager:
         self._playwright = None
         self.context = None
         self.page = None
+        try:
+            self._release_profile_lock()
+        except Exception as exc:  # noqa: BLE001 - cleanup must not raise
+            logger.debug("BrowserManager.close(): releasing the profile lock ignored: %s", type(exc).__name__)
 
         if context is not None:
             try:

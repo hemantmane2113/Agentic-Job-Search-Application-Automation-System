@@ -3,6 +3,8 @@ question panel captured live on 2026-10-08 (job 374, a Chennai walk-in question)
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from naukri_agent.browser import selectors
@@ -172,7 +174,8 @@ def test_choice_options_are_sent_as_buttons_and_a_tap_returns_that_option():
     assert w.channel().ask_choice("Walk-in?", OPTS, 60) == "No"
     keyboard = w.sent()[0]["reply_markup"]["inline_keyboard"]
     assert [row[0]["text"] for row in keyboard] == OPTS
-    assert [row[0]["callback_data"] for row in keyboard] == ["opt:0", "opt:1"]
+    ids = [row[0]["callback_data"] for row in keyboard]
+    assert re.fullmatch(r"opt:[0-9a-f]{6}:0", ids[0]) and ids[1] == ids[0][:-1] + "1"
 
 
 def test_typing_an_option_in_any_case_works_and_stop_is_passed_through():

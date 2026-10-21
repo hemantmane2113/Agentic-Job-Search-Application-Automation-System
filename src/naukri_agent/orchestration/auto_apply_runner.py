@@ -127,6 +127,8 @@ def _status_line(o: AutoApplyOutcome) -> str | None:
         return f"Could not confirm this application - check Naukri before anything else:\n{head}\n{o.url}"
     if o.outcome == "failed":
         return f"An error stopped the run on: {head} ({o.detail}). Nothing further was done."
+    if o.outcome == "declined":
+        return f"Skipped: {head} - you said no. Nothing was applied."
     if o.outcome == "not_native":
         return f"Skipped - this job no longer has a Naukri Apply button, so ignore the question above: {head}"
     if o.outcome == "excluded_type":
@@ -240,6 +242,9 @@ def run_auto_apply(
                     question_text=q, final_answer=ans,
                 )
         if interaction is not None:
+            cancel = getattr(interaction, "cancel_approval", None)
+            if cancel is not None:
+                cancel()  # this job is finished (applied, skipped, failed...): nothing more to hear on its card
             line = _status_line(item)
             if line:
                 interaction.notify(line)

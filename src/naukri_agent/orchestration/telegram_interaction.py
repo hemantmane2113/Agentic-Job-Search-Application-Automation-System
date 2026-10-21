@@ -83,7 +83,17 @@ class TelegramInteraction:
 
     def send_approval(self, job: dict) -> None:
         """Put the job on the phone NOW; the answer is read later by wait_approval()."""
-        self._ch.send_yes_no(format_job_card(job))
+        self._ch.send_yes_no(
+            format_job_card(job) + "\n\nTap Yes or No once - the card will change to \"Applying... please wait\" when I have it.",
+            working="Applying",
+        )
+
+    def cancel_approval(self) -> None:
+        """The job on the card was skipped before an answer was needed (no Apply button, wrong type, ...): stop
+        listening for that card."""
+        cancel = getattr(self._ch, "cancel_prompt", None)
+        if cancel is not None:
+            cancel()
 
     def wait_approval(self) -> bool | None:
         return self._ch.wait_yes_no(self._approve_s)
@@ -132,7 +142,7 @@ class TelegramInteraction:
         for q, a in zip(questions, answers):
             lines += [f"Q: {q}", f"A: {a}", ""]
         lines.append("Submit with these answers?")
-        return self._ch.ask_yes_no("\n".join(lines), self._answer_s)
+        return self._ch.ask_yes_no("\n".join(lines), self._answer_s, working="Submitting")
 
     def notify(self, text: str) -> None:
         try:
@@ -145,5 +155,7 @@ def build_telegram_interaction(settings: Settings, channel: Any = None) -> Teleg
     if not (settings.telegram_bot_token and settings.telegram_chat_id):
         raise ValueError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must both be set in .env")
     return TelegramInteraction(
-        channel or TelegramChannel(settings.telegram_bot_token, settings.telegram_chat_id), settings
+        channel or TelegramChannel(settings.telegram_bot_token, settings.telegram_chat_id,
+                                   instant_ack=settings.telegram_instant_ack),
+        settings,
     )

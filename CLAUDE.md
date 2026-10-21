@@ -42,7 +42,8 @@ out every Sunday at 22:00. The user starts applying from a phone with `/apply`.
 
 ```
 src/naukri_agent/
-  config.py  power.py            settings; keep Windows awake during long jobs
+  config.py  power.py            settings; keep Windows awake during long jobs and while the phone listener runs
+  safe_error.py                  one-line, secret-scrubbed error text for the log file only
   candidate/ resume/ jobs/       profile and resumes; job models and the LLM parser; skill evidence
   matching/                      deterministic scorer: skills 35, experience 20, role 15, salary 11, location 7, education 5,
                                  posted-recently 7. ACCEPT >= 80, REVIEW >= 70
@@ -75,13 +76,29 @@ docs/                            PROJECT_OVERVIEW.md and the architecture/workfl
   applying. Its inspection tooling (`inspect-apply`) is frozen.
 - **Naukri's login page can flash its form before redirecting a logged-in session.** `login()` waits for a late redirect; keep that.
 - **Telegram's connection drops now and then.** Waiting for a tap must survive a dropped connection (`TelegramChannel._wait`).
+- **Every Telegram button belongs to ONE prompt** (`callback_data` carries a prompt id: `y:<id>`, `opt:<id>:<n>`). A tap on any
+  other card answers nothing. Never go back to bare `y` / `n` / `opt:N`: a second tap on the previous job's card (people tap
+  again when the app takes seconds to react) was read as approval of the NEXT job (2026-10-21: Eduitalent "approved" 27 s
+  after the previous job). An answered card's buttons turn into one grey button: "Applying... please wait" or "No - skipped".
+- **A tap is acknowledged within seconds, while the browser is busy** (`telegram_instant_ack`, default on): a small background
+  reader (`TelegramChannel._watch_loop`) watches the ONE card just sent. Telegram allows one `getUpdates` reader at a time, so
+  anything else that reads Telegram while a card is out must call `drain()` / `_stop_watch()` first (all the `ask_*` calls do),
+  and a job that is skipped without an answer must call `cancel_approval()` (the runner's `record()` does). The reader never
+  decides: `wait_yes_no()` still returns the answer. Without it the app read taps only 10-30 s later and people tapped twice.
+- **A sleeping PC cannot hear Telegram.** A PC woken by a scheduled task sleeps again as soon as the task ends (found 2026-10-21:
+  the PC slept 1-5 minutes after each morning message and `/apply` went unheard for six days). The listener holds the PC awake
+  09:40-23:00 (`power.AwakeWindow`); keep that. A PC that is SHUT DOWN cannot be woken by any task.
+- **One Chrome profile, one command at a time.** `BrowserManager.launch` takes `browser/profile_lock.py`'s file lock and waits its
+  turn; do not open the persistent profile any other way.
+- **Errors report only the exception type** everywhere except the local log file, where `safe_error_text` also writes the class
+  name and a scrubbed first line (secrets replaced by `***`); never put that text in the database, an email or Telegram.
 - **Statuses:** `ApplicationStatus` has NOT_APPLYING and IGNORED besides the original ones; both are excluded from digests by default.
 - **Windows specifics:** use PowerShell for Task Scheduler; the shell tool is Git Bash. Avoid `rm -rf` with shell variables.
 
 ## Testing
 
 Three tiers: unit; mocked-browser (`test_browser_*.py`, no real browser); manual (`pytest -m manual`, excluded by default). Run
-`pytest` before calling a change done. Currently **1610 passed, 3 deselected**. A fix for a live bug gets a test built from the
+`pytest` before calling a change done. Currently **1673 passed, 3 deselected**. A fix for a live bug gets a test built from the
 real shape that failed (see `tests/test_choice_questions.py` for the Indium panel).
 
 ## Working style the user expects

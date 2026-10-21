@@ -101,6 +101,26 @@ class Settings(BaseSettings):
     followup_ignore_after_later: int = 4  # the 4th "Later" in a row turns the job into "ignored"
     followup_answer_timeout_minutes: int = 15  # no tap in this time ends the questions; nothing is changed
     followup_state_file: Path = Path("./data/followup_state.json")  # the day the reminder last went out
+    # While the phone listener runs it keeps the PC awake between these two times (24-hour HH:MM, in `timezone`), so a
+    # Telegram reply sent at any time of the day is heard. Without it a PC woken by a scheduled task goes straight back to
+    # sleep and cannot hear /apply. Outside the window the PC may sleep and wakes for the next scheduled task.
+    telegram_listener_keep_awake: bool = True
+    telegram_listener_awake_from: str = "09:40"
+    telegram_listener_awake_until: str = "23:00"
+    # One message a day, at apply_reminder_time, listing the Naukri Apply jobs still waiting and how long each stays on
+    # the list. Silent when none is waiting. It only reminds; it starts and applies nothing.
+    apply_reminder_enabled: bool = True
+    apply_reminder_time: str = "19:00"
+    apply_reminder_state_file: Path = Path("./data/apply_reminder_state.json")
+    # Every command that opens the shared Naukri browser profile takes this lock first and waits its turn (up to the wait
+    # below), so two scheduled tasks that start together never collide on the profile.
+    browser_lock_enabled: bool = True
+    browser_lock_file: Path = Path("./data/browser_profile.lock")
+    browser_lock_wait_minutes: int = 60
+    # True: a Yes/No tap on a job card is acknowledged within seconds ("Applying... please wait") even while the app is
+    # busy loading the page, by a small background reader that only watches that one card. False: the tap is noticed only
+    # when the app next looks (10-30 seconds later), which made people tap again.
+    telegram_instant_ack: bool = True
     telegram_approval_timeout_minutes: int = 20  # waiting for the job's Yes/No
     telegram_answer_timeout_minutes: int = 15  # waiting for each answer / final Yes
 
@@ -345,6 +365,14 @@ class Settings(BaseSettings):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
         return f"{hour:02d}:{minute:02d}"
+
+    @field_validator("telegram_listener_awake_from", "telegram_listener_awake_until", "apply_reminder_time")
+    @classmethod
+    def _validate_hhmm_fields(cls, v: str, info) -> str:
+        parts = v.strip().split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts) or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
+            raise ValueError(f"{info.field_name} must be 'HH:MM' (24-hour), got {v!r}")
+        return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
 
     @field_validator("followup_reminder_time")
     @classmethod

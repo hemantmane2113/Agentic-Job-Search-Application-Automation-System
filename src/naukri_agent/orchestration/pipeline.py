@@ -33,6 +33,7 @@ from naukri_agent.database.repositories import (
     upsert_resume_selection,
 )
 from naukri_agent.jobs.parser import JobParser
+from naukri_agent.safe_error import safe_error_text
 from naukri_agent.jobs.skill_evidence import build_skill_evidence, merged_required_preferred
 from naukri_agent.matching.scorer import score_job
 from naukri_agent.orchestration.discovery import DiscoveryResult
@@ -218,6 +219,7 @@ def run_daily_recommendations(
         try:
             discovery, seq = discover_fn(session, profile, settings, run_id, seq)
         except Exception as exc:  # noqa: BLE001
+            logger.error("daily run: discovery failed: %s", safe_error_text(exc, settings))  # log file only
             seq += 1
             add_run_event(
                 session, daily_run_id=run_id, seq=seq, stage="discover",

@@ -25,7 +25,10 @@ NOW = 1_800_000_000.0
 
 def cfg(tmp_path, **over):
     base = dict(telegram_bot_token="T", telegram_chat_id=CHAT, telegram_remote_start=True,
-                telegram_apply_lock_file=tmp_path / "lock", telegram_listener_max_command_age_seconds=600)
+                telegram_apply_lock_file=tmp_path / "lock", telegram_listener_max_command_age_seconds=600,
+                # the tests must never touch the real Windows power call, the real browser lock or the real reminder file
+                telegram_listener_keep_awake=False, browser_lock_file=tmp_path / "browser.lock",
+                apply_reminder_state_file=tmp_path / "apply_reminder.json", followup_state_file=tmp_path / "followup.json")
     base.update(over)
     return Settings(_env_file=None, **base)
 
@@ -44,7 +47,7 @@ class FakeChannel:
         self.sent.append(text)
 
 
-def make(tmp_path, batches=(), *, summary=(3, 4, 4), spawn=(0, ""), lock=False, **over):
+def make(tmp_path, batches=(), *, summary=(3, 4, 4), spawn=(0, ""), lock=False, listener_kw=None, **over):
     ch = FakeChannel(batches)
     calls = {"spawn": 0, "env": None}
 
@@ -58,8 +61,10 @@ def make(tmp_path, batches=(), *, summary=(3, 4, 4), spawn=(0, ""), lock=False, 
         return summary
 
     sleeps = []
+    kw = dict(browser_busy=lambda _p: None)
+    kw.update(listener_kw or {})
     lis = Listener(cfg(tmp_path, **over), ch, spawn=fake_spawn, summary=fake_summary, clock=lambda: NOW,
-                   sleep=sleeps.append, lock_held=lambda _p: lock)
+                   sleep=sleeps.append, lock_held=lambda _p: lock, **kw)
     return lis, ch, calls, sleeps
 
 
@@ -107,7 +112,9 @@ def test_a_busy_database_is_explained_and_nothing_starts(tmp_path):
 def test_an_old_apply_is_not_acted_on_and_the_user_is_told(tmp_path):
     lis, ch, calls, _ = make(tmp_path, [[("/apply", NOW - 3600)]])
     lis.step()
-    assert calls["spawn"] == 0 and "too old" in ch.sent[0]
+    assert calls["spawn"] == 0
+    assert "did not act on it" in ch.sent[0] and "send /apply again" in ch.sent[0]
+    assert "60 minutes ago" in ch.sent[0]
 
 
 def test_other_old_messages_are_ignored_quietly(tmp_path):

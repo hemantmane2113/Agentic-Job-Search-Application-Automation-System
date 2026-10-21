@@ -3,6 +3,7 @@ answer new prompts, silence is None, and the token never leaks."""
 
 from __future__ import annotations
 
+import re
 import urllib.error
 
 import pytest
@@ -23,19 +24,47 @@ class World:
         self.now = 0.0
         self.calls = []
         self.uid = 0
+        self.live_id = None  # the prompt id on the buttons of the card sent last
+
+    def _note_card(self, params):
+        for row in (params.get("reply_markup") or {}).get("inline_keyboard") or []:
+            for b in row:
+                parts = str(b.get("callback_data", "")).split(":")
+                if parts[0] in ("y", "n") and len(parts) == 2:
+                    self.live_id = parts[1]
+                elif parts[0] == "opt" and len(parts) == 3:
+                    self.live_id = parts[1]
+
+    def _tap_the_live_card(self, u):
+        """A scripted tap written as a bare "y" / "n" / "opt:N" means a tap on the card on screen now, so give it that
+        card's id. A tap built with button(..., stale=True) keeps exactly the data it was given."""
+        cb = u.get("callback_query")
+        if not cb:
+            return u
+        cb = dict(cb)
+        if cb.pop("_stale", False) or not self.live_id:
+            return {**u, "callback_query": cb}
+        data = str(cb.get("data", ""))
+        if data in ("y", "n"):
+            cb["data"] = f"{data}:{self.live_id}"
+        elif re.fullmatch(r"opt:\d+", data):
+            cb["data"] = f"opt:{self.live_id}:{data[4:]}"
+        return {**u, "callback_query": cb}
 
     def clock(self):
         return self.now
 
     def transport(self, method, params, timeout):
         self.calls.append((method, params))
+        if method == "sendMessage":
+            self._note_card(params)
         if method == "getUpdates":
             self.now += params.get("timeout", 0) or 0.01
             batch = self.batches.pop(0) if self.batches else []
             out = []
             for u in batch:
                 self.uid += 1
-                out.append({"update_id": self.uid, **u})
+                out.append({"update_id": self.uid, **self._tap_the_live_card(u)})
             return {"ok": True, "result": out}
         return {"ok": True, "result": {}}
 
@@ -50,15 +79,21 @@ def text(t, chat=CHAT):
     return {"message": {"chat": {"id": int(chat)}, "text": t}}
 
 
-def button(data, chat=CHAT):
-    return {"callback_query": {"id": "cb1", "data": data, "message": {"chat": {"id": int(chat)}}}}
+def button(data, chat=CHAT, stale=False, message_id=None):
+    message = {"chat": {"id": int(chat)}, **({"message_id": message_id} if message_id is not None else {})}
+    cb = {"id": "cb1", "data": data, "message": message}
+    if stale:
+        cb["_stale"] = True
+    return {"callback_query": cb}
 
 
 def test_button_press_yes_returns_true_and_the_prompt_has_yes_no_buttons():
     w = World([[], [button("y")]])  # drain finds nothing, then the tap arrives
     assert w.channel().ask_yes_no("Apply?", 60) is True
     prompt = w.sent()[0]
-    assert prompt["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "y"
+    yes, no = prompt["reply_markup"]["inline_keyboard"][0]
+    assert re.fullmatch(r"y:[0-9a-f]{6}", yes["callback_data"])
+    assert no["callback_data"] == "n:" + yes["callback_data"].split(":")[1]  # both buttons belong to the same prompt
     assert any(m == "answerCallbackQuery" for m, _ in w.calls)
 
 

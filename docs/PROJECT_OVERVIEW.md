@@ -26,12 +26,16 @@ decides, and a human approves every application.**
 | 10:00 | **Daily run.** Searches, opens and reads 50 fresh jobs, scores them, picks the top 10 scoring 80 or more, emails the digest, pings Telegram. |
 | 10:05 | **Research.** Waits for the digest, then researches the company-website jobs in it and emails one research email. |
 | 10:30, 15:00 | **Watchdog.** Silent unless the refresh, the run or the digest did not happen, then it alerts on Telegram. |
+| 19:00 | **Evening reminder.** Telegram lists the Naukri Apply jobs still waiting and the date each leaves the list. Silent if none. Reply `/apply` when free. |
 | 20:00 | **"Did you apply?"** Telegram asks about company-website jobs still waiting for an answer. Silent if none. |
 | Sunday 22:00 | **Weekly report.** An Excel file of every job given that Monday to Sunday and its status, emailed to you. |
-| Always on | **Phone control.** A small listener on the PC answers `/apply`, `/applied`, `/status`, `/help` from your Telegram chat. |
+| Always on | **Phone control.** A small listener on the PC answers `/apply`, `/applied`, `/status`, `/help` from your Telegram chat. From 09:40 to 23:00 it keeps the PC awake so a reply sent at any time is heard. |
 
-Each of these is a Windows scheduled task that wakes the PC if it is asleep. While a long job runs, the app asks Windows not to
-sleep (`power.py`); the screen may still turn off.
+Each of these is a Windows scheduled task that wakes the PC if it is asleep (a PC that is shut down cannot be woken). While a
+long job runs, the app asks Windows not to sleep (`power.py`); the screen may still turn off. A PC woken by a task goes straight
+back to sleep when the task ends, and a sleeping PC cannot hear Telegram, so the listener also holds the PC awake between
+`TELEGRAM_LISTENER_AWAKE_FROM` and `_UNTIL` (default 09:40-23:00). Commands that open the shared Naukri browser profile take
+turns through a file lock (`browser/profile_lock.py`), so tasks that start together never collide.
 
 ---
 
@@ -112,6 +116,10 @@ sends a card (score, skills matched and missing, resume to use), waits for your 
 if it is not already there (verified, or nothing is applied), clicks Apply, and answers any questions: from your profile when
 there is one clear value, otherwise by asking you (choices as buttons). It counts as applied only when Naukri's own page shows
 "Applied". A conservative stop follows any unconfirmed result. At most 4 applications per rolling 24 hours.
+Each card's Yes/No buttons are tied to that one card: a second tap on an earlier job's card is told it is no longer active and
+can never approve the next job. Your tap is acknowledged within seconds even while the browser is loading the page: the card
+turns into one grey "Applying... please wait" (or "No - skipped") button, a No also gets a short "Skipped" message, and the
+usual "Applied: ..." message follows when Naukri confirms.
 
 The apply panel is Naukri's chat widget. It is the least predictable part of the system: question types (radio buttons, text boxes,
 checkboxes) and even the order of questions vary, and Naukri sometimes skips a question. The code handles each type seen so far and
@@ -156,7 +164,7 @@ free tier. Careers pages that show no text to an automated reader are flagged, a
 
 Three tiers, kept separate: unit tests (pure logic), mocked-browser tests (`tests/browser_fakes.py`, no real browser or network),
 and manual tests in `tests/manual/` that need a real Naukri account (`pytest -m manual`, excluded by default). Currently
-**1610 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
+**1673 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
 confirm is called out as UNVERIFIED in `selectors.py` until a real run proves it.
 
 ---
@@ -179,4 +187,8 @@ confirm is called out as UNVERIFIED in `selectors.py` until a real run proves it
 - **The digest is wrong:** `recommendations/builder.py` (eligibility and ranking) and `notifications/render.py` (the text).
 - **The apply panel broke:** `browser/apply_workflow.py` and `browser/selectors.py`; read the saved failure snapshot first.
 - **Login or the site changed:** `browser/login.py`, `browser/selectors.py`, and the login diagnostics folder.
-- **Phone control or the questions:** `orchestration/telegram_listener.py`, `followup.py`, `notifications/telegram.py`.
+- **Phone control or the questions:** `orchestration/telegram_listener.py`, `followup.py`, `apply_reminder.py`, `notifications/telegram.py`.
+  The log records every message the listener hears or ignores (the command word only), a "listening" line every half hour,
+  and a line when it was not listening for a while (the PC asleep or off).
+- **Two commands collided on Chrome:** `browser/profile_lock.py` (who holds it is in `data/browser_profile.lock`); a failed browser
+  launch is logged with a scrubbed first line of the error (`safe_error.py`), in the log file only.

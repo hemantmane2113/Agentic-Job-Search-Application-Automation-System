@@ -37,6 +37,20 @@ def split_skill_factors(positives: list[str], negatives: list[str]) -> dict[str,
     return out
 
 
+def waiting_jobs(session: Any, candidate_id: int, settings: Settings, now: datetime.datetime) -> list[dict]:
+    """The jobs `telegram-apply` could offer, each with the date its place on the list ends: auto_apply_max_job_age_days
+    after the last time discovery read it (reading it again, as a filler, extends that). Best score first. Read-only."""
+    from naukri_agent.database.models import Job
+
+    out = []
+    for pick in select_candidates(session, candidate_id, settings, now):
+        job = session.get(Job, pick["job_id"])
+        last_seen = job.last_seen_at if job is not None else None
+        expires = last_seen + datetime.timedelta(days=settings.auto_apply_max_job_age_days) if last_seen else None
+        out.append({"title": pick["title"], "company": pick["company"], "score": pick["score"], "expires": expires})
+    return out
+
+
 def select_candidates(session: Any, candidate_id: int, settings: Settings, now: datetime.datetime) -> list[dict]:
     """Eligible jobs, best score first. Pure DB reads."""
     from naukri_agent.database.models import Job, JobExtraction, JobMatch, ResumeSelection
