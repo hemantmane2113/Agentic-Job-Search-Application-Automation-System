@@ -104,9 +104,21 @@ class Settings(BaseSettings):
     # While the phone listener runs it keeps the PC awake between these two times (24-hour HH:MM, in `timezone`), so a
     # Telegram reply sent at any time of the day is heard. Without it a PC woken by a scheduled task goes straight back to
     # sleep and cannot hear /apply. Outside the window the PC may sleep and wakes for the next scheduled task.
+    # The window starts early on purpose: a PC switched on at 09:00 would otherwise sleep at 09:30 (30 minutes after
+    # boot), before the window opened, and Windows ends the listener's task when the PC sleeps (22 Oct 2026).
     telegram_listener_keep_awake: bool = True
-    telegram_listener_awake_from: str = "09:40"
+    telegram_listener_awake_from: str = "06:00"
     telegram_listener_awake_until: str = "23:00"
+    # Every scheduled command (profile refresh, daily run, research, weekly report, watchdog) first checks that the
+    # listener's task is running and starts it again if Windows ended it. Does not change the task's own settings.
+    phone_control_auto_restart: bool = True
+    phone_control_task_name: str = "Naukri Agent - Phone Control"
+    # `naukri-agent phone-guard` (run every 10 minutes by its own task) restarts a dead listener, and once a day at
+    # alive_message_time sends ONE Telegram message saying the PC is on and what the day looks like. When that message does
+    # not arrive, the PC or its internet is down: a dead PC cannot alert anyone, so silence is the signal.
+    alive_message_enabled: bool = True
+    alive_message_time: str = "10:50"
+    phone_guard_state_file: Path = Path("./data/phone_guard_state.json")
     # One message a day, at apply_reminder_time, listing the Naukri Apply jobs still waiting and how long each stays on
     # the list. Silent when none is waiting. It only reminds; it starts and applies nothing.
     apply_reminder_enabled: bool = True
@@ -366,7 +378,7 @@ class Settings(BaseSettings):
             raise ValueError(f"daily_run_time must be 'HH:MM' (24-hour), got {v!r}")
         return f"{hour:02d}:{minute:02d}"
 
-    @field_validator("telegram_listener_awake_from", "telegram_listener_awake_until", "apply_reminder_time")
+    @field_validator("telegram_listener_awake_from", "telegram_listener_awake_until", "apply_reminder_time", "alive_message_time")
     @classmethod
     def _validate_hhmm_fields(cls, v: str, info) -> str:
         parts = v.strip().split(":")

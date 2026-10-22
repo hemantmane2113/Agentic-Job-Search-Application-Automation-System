@@ -1,4 +1,4 @@
-# naukri-agent: project context for Claude Code
+﻿# naukri-agent: project context for Claude Code
 
 Read automatically at the start of every session. It states what the project is, the rules that must never be broken, how the
 code is laid out, and how to work with this user. For the full picture see `docs/PROJECT_OVERVIEW.md`; for setup, `README.md`.
@@ -44,6 +44,7 @@ out every Sunday at 22:00. The user starts applying from a phone with `/apply`.
 src/naukri_agent/
   config.py  power.py            settings; keep Windows awake during long jobs and while the phone listener runs
   safe_error.py                  one-line, secret-scrubbed error text for the log file only
+scripts/                         register_phone_guard.ps1 (the 10-minute guard task), repair_stale_reposts.py
   candidate/ resume/ jobs/       profile and resumes; job models and the LLM parser; skill evidence
   matching/                      deterministic scorer: skills 35, experience 20, role 15, salary 11, location 7, education 5,
                                  posted-recently 7. ACCEPT >= 80, REVIEW >= 70
@@ -65,7 +66,9 @@ docs/                            PROJECT_OVERVIEW.md and the architecture/workfl
 ## What runs when (Windows Task Scheduler, user signed in)
 
 09:45 profile refresh · 10:00 `run-daily` · 10:05 `research-jobs --wait-for-digest` · 10:30 and 15:00 `watchdog` · Sunday 22:00
-`weekly-report` · at logon `telegram-listen` (phone control, always on). The 20:00 "did you apply?" question is sent by the listener.
+`weekly-report` · at logon `telegram-listen` (phone control, always on) · every 10 minutes 06:00-23:00 `phone-guard` (hidden, via
+pythonw). The 19:00 reminder and the 20:00 "did you apply?" question are sent by the listener; the once-a-day "PC is alive"
+message (10:50) by `phone-guard`.
 
 ## Things to know before changing anything
 
@@ -87,7 +90,18 @@ docs/                            PROJECT_OVERVIEW.md and the architecture/workfl
   decides: `wait_yes_no()` still returns the answer. Without it the app read taps only 10-30 s later and people tapped twice.
 - **A sleeping PC cannot hear Telegram.** A PC woken by a scheduled task sleeps again as soon as the task ends (found 2026-10-21:
   the PC slept 1-5 minutes after each morning message and `/apply` went unheard for six days). The listener holds the PC awake
-  09:40-23:00 (`power.AwakeWindow`); keep that. A PC that is SHUT DOWN cannot be woken by any task.
+  06:00-23:00 (`power.AwakeWindow`); keep that. A PC that is SHUT DOWN cannot be woken by any task.
+- **Windows ends the listener's task whenever the PC sleeps** (0x8007042B, "process terminated unexpectedly") and the task is
+  only started at logon, so after one sleep nothing heard `/apply` and nothing kept the PC awake (15-20 Oct; again 22 Oct 09:30,
+  when a 09:00 boot slept before the old 09:40 window opened). So every scheduled command (profile-refresh, run-daily,
+  research-jobs, weekly-report) and the watchdog first calls `orchestration/phone_control.ensure_phone_control_running`, which
+  starts the task again if it is not Running; the watchdog also tells you. Tests never reach the real Task Scheduler
+  (`tests/conftest.py`).
+- **The owner is often away from the PC for weeks, so SILENCE must be a signal.** A frozen or switched-off PC cannot alert anyone.
+  `naukri-agent phone-guard` (task "Naukri Agent - Phone Guard", `scripts/register_phone_guard.ps1`) restarts a dead listener
+  within 10 minutes and sends ONE "Daily check ... the PC is on" Telegram message a day (`alive_message_time`, 10:50). No message
+  = something is wrong with the PC or its internet. The Phone Control task has "run only if a network is available" switched
+  OFF (a Wi-Fi blip used to end it). The guard only sends, never reads, Telegram.
 - **One Chrome profile, one command at a time.** `BrowserManager.launch` takes `browser/profile_lock.py`'s file lock and waits its
   turn; do not open the persistent profile any other way.
 - **Errors report only the exception type** everywhere except the local log file, where `safe_error_text` also writes the class
@@ -98,7 +112,7 @@ docs/                            PROJECT_OVERVIEW.md and the architecture/workfl
 ## Testing
 
 Three tiers: unit; mocked-browser (`test_browser_*.py`, no real browser); manual (`pytest -m manual`, excluded by default). Run
-`pytest` before calling a change done. Currently **1673 passed, 3 deselected**. A fix for a live bug gets a test built from the
+`pytest` before calling a change done. Currently **1708 passed, 3 deselected**. A fix for a live bug gets a test built from the
 real shape that failed (see `tests/test_choice_questions.py` for the Indium panel).
 
 ## Working style the user expects

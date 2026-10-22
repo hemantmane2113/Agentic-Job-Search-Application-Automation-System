@@ -1,4 +1,4 @@
-# naukri-agent — Project Overview & Study Guide
+﻿# naukri-agent — Project Overview & Study Guide
 
 For anyone reading this codebase for the first time, or coming back after a break: **what the system does, why it is built
 this way, and how the pieces fit**. It describes the system as of October 2026.
@@ -26,15 +26,17 @@ decides, and a human approves every application.**
 | 10:00 | **Daily run.** Searches, opens and reads 50 fresh jobs, scores them, picks the top 10 scoring 80 or more, emails the digest, pings Telegram. |
 | 10:05 | **Research.** Waits for the digest, then researches the company-website jobs in it and emails one research email. |
 | 10:30, 15:00 | **Watchdog.** Silent unless the refresh, the run or the digest did not happen, then it alerts on Telegram. |
+| 06:00-23:00, every 10 min | **Phone guard.** Restarts the phone listener if Windows ended it. Once a day (10:50) it sends one "Daily check: the PC is on" Telegram message; if that message does not arrive, the PC or its internet is down. |
 | 19:00 | **Evening reminder.** Telegram lists the Naukri Apply jobs still waiting and the date each leaves the list. Silent if none. Reply `/apply` when free. |
 | 20:00 | **"Did you apply?"** Telegram asks about company-website jobs still waiting for an answer. Silent if none. |
 | Sunday 22:00 | **Weekly report.** An Excel file of every job given that Monday to Sunday and its status, emailed to you. |
-| Always on | **Phone control.** A small listener on the PC answers `/apply`, `/applied`, `/status`, `/help` from your Telegram chat. From 09:40 to 23:00 it keeps the PC awake so a reply sent at any time is heard. |
+| Always on | **Phone control.** A small listener on the PC answers `/apply`, `/applied`, `/status`, `/help` from your Telegram chat. From 06:00 to 23:00 it keeps the PC awake so a reply sent at any time is heard, and every scheduled task first starts it again if Windows ended it. |
 
 Each of these is a Windows scheduled task that wakes the PC if it is asleep (a PC that is shut down cannot be woken). While a
 long job runs, the app asks Windows not to sleep (`power.py`); the screen may still turn off. A PC woken by a task goes straight
 back to sleep when the task ends, and a sleeping PC cannot hear Telegram, so the listener also holds the PC awake between
-`TELEGRAM_LISTENER_AWAKE_FROM` and `_UNTIL` (default 09:40-23:00). Commands that open the shared Naukri browser profile take
+`TELEGRAM_LISTENER_AWAKE_FROM` and `_UNTIL` (default 06:00-23:00). Windows ends the listener's task when the PC sleeps, so
+`orchestration/phone_control.py` restarts it from each scheduled command and from the watchdog. Commands that open the shared Naukri browser profile take
 turns through a file lock (`browser/profile_lock.py`), so tasks that start together never collide.
 
 ---
@@ -164,15 +166,15 @@ free tier. Careers pages that show no text to an automated reader are flagged, a
 
 Three tiers, kept separate: unit tests (pure logic), mocked-browser tests (`tests/browser_fakes.py`, no real browser or network),
 and manual tests in `tests/manual/` that need a real Naukri account (`pytest -m manual`, excluded by default). Currently
-**1673 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
+**1708 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
 confirm is called out as UNVERIFIED in `selectors.py` until a real run proves it.
 
 ---
 
 ## 8. Operating it
 
-- **Scheduled tasks:** "Naukri Agent - Daily Jobs", "- Profile Refresh", "- Research", "- Watchdog", "- Phone Control", "- Weekly
-  Report". They run only while you are signed in (locked is fine). Do not close the black window of the phone listener.
+- **Scheduled tasks:** "Naukri Agent - Daily Jobs", "- Profile Refresh", "- Research", "- Watchdog", "- Phone Control", "- Phone Guard"
+  (`scripts/register_phone_guard.ps1`), "- Weekly Report". They run only while you are signed in (locked is fine). Do not close the black window of the phone listener.
 - **Backups:** copy `data/naukri_agent.db` before any manual edit to it.
 - **When something fails:** `logs/naukri_agent.log`; `run_events` in the database (every stage); `inspection_output/auto_apply/*_failure.*`
   for a failed apply; `inspection_output/login_diagnostics/` for a login problem; the watchdog's Telegram alert.

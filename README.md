@@ -348,6 +348,29 @@ only for the one `telegram-apply` process it starts (the listener's own settings
 never imports any apply code; and while an apply run is going it does not read Telegram, because the run is
 reading your taps. The PC must be on and logged in, since the clicking happens in its browser.
 
+### Keeping phone control alive while you are away (the phone guard)
+
+Windows ends the listener's task whenever the PC sleeps or the network blips. Two things keep it alive, and let you know when
+the PC itself is in trouble:
+
+* The listener holds the PC awake from 06:00 to 23:00 (`TELEGRAM_LISTENER_AWAKE_FROM` / `_UNTIL`).
+* A second task, **Naukri Agent - Phone Guard**, runs `naukri-agent phone-guard` every 10 minutes from 06:00 to 23:00 (hidden;
+  it uses `pythonw.exe`). It starts the listener again if it is not running, and once a day at `ALIVE_MESSAGE_TIME` (10:50) it
+  sends one Telegram message: the PC is on, phone control is running, what the job search did, how many jobs wait for `/apply`.
+  **If that message does not arrive, the PC or its internet is down; ask someone at home to look.** A frozen or shut-down PC
+  cannot alert you, so silence is the signal.
+
+Register it once (PowerShell, no administrator rights):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\register_phone_guard.ps1
+```
+
+The same script switches off "run only if a network is available" on the Phone Control task. Try it without effect with
+`naukri-agent phone-guard --dry-run`. Leave the PC switched on (it may sleep after 23:00; the morning tasks wake it) and set
+Windows to sign in automatically after a restart if you will be away for long: a restart that stops at the sign-in screen stops
+everything. A PC that is shut down cannot run any task.
+
 ## "Did you apply?" for company-website jobs
 
 The app cannot see what you do on a company's own site, so those jobs used to stay unrecorded unless you ran

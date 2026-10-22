@@ -225,6 +225,7 @@ def run_watchdog(
     session_factory: Any = None,
     notify: Callable[[str], None] | None = None,
     dry_run: bool = False,
+    phone_control_fn: Callable[[Settings], str] | None = None,
 ) -> WatchdogResult:
     now = now or datetime.datetime.now(datetime.UTC)
     tz = ZoneInfo(settings.timezone)
@@ -233,6 +234,28 @@ def run_watchdog(
     refreshes, runs, readable = _read_db(settings, session_factory, now)
     info = (task_info_fn or read_task_info)(settings.watchdog_daily_task_name)
     problems, notes = evaluate(settings, now=now, task_info=info, refreshes_today=refreshes, runs_today=runs, db_readable=readable)
+    # 4. the phone listener: if Windows ended it (it does whenever the PC sleeps), start it again and say so. Not in a dry run.
+    if dry_run:
+        notes.append("phone control not checked (dry run)")
+    else:
+        from naukri_agent.orchestration.phone_control import ensure_phone_control_running
+
+        phone = (phone_control_fn or ensure_phone_control_running)(settings)
+        if phone == "started":
+            problems.append(Problem(
+                kind="phone_control_restarted",
+                text="Phone control (the /apply listener) had stopped, so /apply was not being heard. I started it again; "
+                     "if you tried /apply earlier, send it again now.",
+            ))
+        elif phone in ("failed", "disabled"):
+            problems.append(Problem(
+                kind="phone_control_down",
+                text="Phone control (the /apply listener) is not running and could not be started, so /apply will not "
+                     f"work. On the PC, start the '{settings.phone_control_task_name}' task.",
+            ))
+        elif phone == "unavailable":
+            notes.append("phone control could not be checked")
+
     result = WatchdogResult(problems=problems, notes=notes)
 
     state = _load_state(Path(settings.watchdog_state_file))

@@ -44,10 +44,22 @@ _KEEP_AWAKE_COMMANDS = frozenset({
 })
 
 
+# The scheduled commands. Each first checks that the phone listener is running (Windows ends its task whenever the PC
+# sleeps) and starts it again if not. The watchdog does the same itself, so that it can also tell you about it.
+_REVIVE_PHONE_CONTROL_COMMANDS = frozenset({"profile-refresh", "run-daily", "research-jobs", "weekly-report"})
+
+
 @click.group()
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """Agentic job-search and application-assistance system for Naukri.com."""
+    if ctx.invoked_subcommand in _REVIVE_PHONE_CONTROL_COMMANDS:
+        try:
+            from naukri_agent.orchestration.phone_control import ensure_phone_control_running
+
+            ensure_phone_control_running(get_settings())
+        except Exception:  # noqa: BLE001 - phone control must never stop a scheduled job
+            pass
     if ctx.invoked_subcommand in _KEEP_AWAKE_COMMANDS:
         from naukri_agent.power import keep_awake
 
@@ -247,6 +259,19 @@ def watchdog(dry_run: bool) -> None:
     click.echo(result.model_dump_json(indent=2))
     if result.problems:
         sys.exit(1)
+
+
+@cli.command("phone-guard")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what it would do; start and send nothing.")
+def phone_guard(dry_run: bool) -> None:
+    """
+    Keep phone control alive: start the /apply listener again if Windows ended it, and once a day send the
+    "PC is alive" Telegram message. Run every 10 minutes by the 'Naukri Agent - Phone Guard' task. Always exits 0.
+    """
+    settings = get_settings()
+    from naukri_agent.orchestration.phone_guard import run_phone_guard
+
+    click.echo(run_phone_guard(settings, dry_run=dry_run).model_dump_json(indent=2))
 
 
 @cli.command("research-jobs")

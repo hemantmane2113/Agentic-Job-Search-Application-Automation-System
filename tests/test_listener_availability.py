@@ -84,12 +84,12 @@ def test_the_screen_is_never_kept_on(monkeypatch):
 def test_the_listener_follows_the_window_by_the_clock_and_lets_go_when_it_stops(tmp_path, monkeypatch):
     rec = Recorder()
     monkeypatch.setattr(power, "_set_state", rec)
-    now = {"t": at(9, 0)}
+    now = {"t": at(5, 0)}
     ch = FakeChannel()
     lis = Listener(cfg(tmp_path, telegram_listener_keep_awake=True), ch, clock=lambda: now["t"], sleep=lambda s: None,
                    lock_held=lambda _p: False, browser_busy=lambda _p: None)
     lis._watch_the_clock()
-    assert rec.calls == []  # 09:00 is before the window
+    assert rec.calls == []  # 05:00 is before the window
     now["t"] = at(10, 0)
     lis._watch_the_clock()
     assert rec.calls == [power.ES_CONTINUOUS | power.ES_SYSTEM_REQUIRED]
@@ -113,7 +113,7 @@ def test_bad_times_in_the_settings_are_refused(tmp_path):
             Settings(_env_file=None, **{field: "25:00"})
     assert Settings(_env_file=None, apply_reminder_time="7:05").apply_reminder_time == "07:05"
     d = Settings(_env_file=None)
-    assert (d.telegram_listener_awake_from, d.telegram_listener_awake_until, d.apply_reminder_time) == ("09:40", "23:00", "19:00")
+    assert (d.telegram_listener_awake_from, d.telegram_listener_awake_until, d.apply_reminder_time) == ("06:00", "23:00", "19:00")
 
 
 # --- a message that arrived while the PC slept ----------------------------------------------------------------------------
