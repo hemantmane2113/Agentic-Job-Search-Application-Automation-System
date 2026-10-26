@@ -348,6 +348,14 @@ only for the one `telegram-apply` process it starts (the listener's own settings
 never imports any apply code; and while an apply run is going it does not read Telegram, because the run is
 reading your taps. The PC must be on and logged in, since the clicking happens in its browser.
 
+**Questions.** The app asks you only the question Naukri's form is asking right now ("Question 1", "Question 2", ...), because
+Naukri's form asks only what it cannot fill from your profile or from earlier tries, even when its data lists more. A typed answer
+gets a short Yes/No ("Send this answer to Naukri?") before it goes in; a tap-choice answer is sent when you tap. If the form closes
+while you are thinking, the app reopens it and sends your answer into the fresh form; if anything looks unexpected it types nothing
+and hands the job back to you (anything already sent is kept by Naukri, so applying by hand asks only what is left). Each
+attempt saves `inspection_output/auto_apply/<attempt>_form.json`: what Naukri listed versus what its form asked.
+`APPLY_FOLLOW_LIVE_FORM=false` goes back to the old way (ask everything first, then type everything).
+
 ### Keeping phone control alive while you are away (the phone guard)
 
 Windows ends the listener's task whenever the PC sleeps or the network blips. Two things keep it alive, and let you know when

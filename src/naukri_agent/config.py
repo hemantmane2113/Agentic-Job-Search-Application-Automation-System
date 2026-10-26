@@ -133,6 +133,15 @@ class Settings(BaseSettings):
     # busy loading the page, by a small background reader that only watches that one card. False: the tap is noticed only
     # when the app next looks (10-30 seconds later), which made people tap again.
     telegram_instant_ack: bool = True
+    # Naukri's application form breaks when it is left open while the person answers on Telegram (2 min 28 s: Naukri's own
+    # error page; 4 min 40 s: the form had closed). If answering took longer than this, the app reopens the form and sends the
+    # saved answers at once instead. 0 turns that off.
+    apply_panel_max_wait_seconds: int = 60
+    # True (default): the app asks you only the question Naukri's form is asking right now, sends your answer, waits for
+    # Naukri's reply, and repeats until the form closes. Naukri's question LIST names every question the employer set, but the
+    # form asks only what it cannot fill from your profile or from earlier tries (23 Oct: 7 listed, 1 asked), so answering the
+    # whole list typed answers into questions the form never asked. False: the old way (ask all, then type all).
+    apply_follow_live_form: bool = True
     telegram_approval_timeout_minutes: int = 20  # waiting for the job's Yes/No
     telegram_answer_timeout_minutes: int = 15  # waiting for each answer / final Yes
 

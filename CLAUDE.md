@@ -102,6 +102,35 @@ message (10:50) by `phone-guard`.
   within 10 minutes and sends ONE "Daily check ... the PC is on" Telegram message a day (`alive_message_time`, 10:50). No message
   = something is wrong with the PC or its internet. The Phone Control task has "run only if a network is available" switched
   OFF (a Wi-Fi blip used to end it). The guard only sends, never reads, Telegram.
+- **Naukri's question form must not sit open while the person answers on Telegram, and answers must go in at Naukri's pace.**
+  Found 22-26 Oct (Tiger Analytics failed three ways): after 2 min 28 s open, four answers typed in ONE second gave Naukri's own
+  "error while processing your job application"; after 4 min 40 s the form had closed. So: (1) `submit_answer` waits after each
+  Save until the bot adds its next `li.botItem` (VERIFIED selector) or the form closes, and returns `next|closed|timeout|skipped`;
+  a `closed` form means Naukri finished early, so the runner stops answering and checks "Applied" (no more spurious errors);
+  (2) if collecting the answers took longer than `apply_panel_max_wait_seconds` (60; 0 = off) the runner reopens the form
+  (`NaukriClient.reopen_application`: reload the job page, click Apply, read the questions) and replays the saved answers matched
+  by question text (`_replay_plan`); anything it cannot match sends NOTHING and hands the job back. **UNVERIFIED against live Naukri:**
+  the reopen path (a job's Apply clicked a second time) has only run against fakes; the first real use will show. Do not test it by
+  pressing Apply on the account.
+- **Answer what the form ASKS, not what Naukri's data LISTS** (`apply_follow_live_form`, default on; `_follow_live_form` in
+  `auto_apply_runner.py`). Found 23-26 Oct: Naukri's data listed 7 questions for Tiger Analytics but its form asked ONE
+  ("... experience in Deployment?"): it keeps the answers it already has (after a failed try it asks only what is left) and fills
+  notice period and pay from the profile. Typing the whole list put answers into questions never asked (the saved panel of 10 Oct
+  shows the bot replying "Sorry! I am not trained to answer this query :("), in a one-second burst that lost one. So the runner
+  reads the form's current question (`ApplyWorkflowSession.read_live_question`: last non-"sorry" `li.botItem`, the choices on
+  screen, whether the text box is showing; it must be the same on two looks), asks the person ONLY that on Telegram ("Question 1",
+  no total), confirms typed answers with a short Yes/No (`confirm_answer`), and sends only if the form is STILL asking that exact
+  question (`answer_live_question` raises `FormChanged` and types nothing otherwise). It then waits for the bot's next message and
+  repeats until the form closes (15-question cap; a question asked a third time, a form asking nothing answerable, or two reopenings
+  = hand the job back; a form-caused handback first checks whether Naukri shows the job as Applied). If the form closes while the
+  person thinks, it is reopened and the saved answer reused. `<attempt>_form.json` records what was listed vs asked.
+  **UNVERIFIED against live Naukri:** this whole flow has only run against scripted copies of the real page (the `li.botItem`,
+  choice-label and text-box selectors are verified from the saved 10 Oct panel); the first real use will tell. Do not test it by
+  pressing Apply on the account.
+- **The network guard stays armed for the rest of a browser session** after the first application form is opened, and it also blocks
+  the resume UPLOAD (21 Oct: Eduitalent's resume change failed; the log shows `BLOCKED ... filevalidation.naukri.com/file`). So before
+  a resume change in a session that has already opened a form, the runner starts a fresh browser (`session_armed`). A resume change
+  that cannot be confirmed saves `<attempt>_resume.png/.html` and says what Naukri's profile showed.
 - **One Chrome profile, one command at a time.** `BrowserManager.launch` takes `browser/profile_lock.py`'s file lock and waits its
   turn; do not open the persistent profile any other way.
 - **Errors report only the exception type** everywhere except the local log file, where `safe_error_text` also writes the class
@@ -112,7 +141,7 @@ message (10:50) by `phone-guard`.
 ## Testing
 
 Three tiers: unit; mocked-browser (`test_browser_*.py`, no real browser); manual (`pytest -m manual`, excluded by default). Run
-`pytest` before calling a change done. Currently **1708 passed, 3 deselected**. A fix for a live bug gets a test built from the
+`pytest` before calling a change done. Currently **1771 passed, 3 deselected**. A fix for a live bug gets a test built from the
 real shape that failed (see `tests/test_choice_questions.py` for the Indium panel).
 
 ## Working style the user expects

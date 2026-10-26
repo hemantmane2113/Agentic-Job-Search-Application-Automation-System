@@ -105,10 +105,11 @@ class TelegramInteraction:
     def ask_question(
         self, index: int, total: int, text: str, suggestion: str | None, options: list[str] | None = None
     ) -> str | None:
+        label = f"Question {index}/{total}" if total else f"Question {index}"  # the form decides how many it asks
         if options:  # a choice question: tap one of the offered answers
             hint = f"\n\nFrom your profile I'd answer: {suggestion}" if suggestion in options else ""
             reply = self._ch.ask_choice(
-                f"Question {index}/{total}:\n{text}{hint}\n\nTap an answer - it is submitted straight away, there is no second confirmation. (Send {STOP_WORD} to give up on this job.)",
+                f"{label}:\n{text}{hint}\n\nTap an answer - it is submitted straight away, there is no second confirmation. (Send {STOP_WORD} to give up on this job.)",
                 list(options),
                 self._answer_s,
             )
@@ -119,7 +120,7 @@ class TelegramInteraction:
             else "\n\nI have no answer for this one - type yours."
         )
         reply = self._ch.ask_text(
-            f"Question {index}/{total}:\n{text}{hint}\n\n(Send {STOP_WORD} to give up on this job.)",
+            f"{label}:\n{text}{hint}\n\n(Send {STOP_WORD} to give up on this job.)",
             self._answer_s,
         )
         if reply is None or reply.lower() == STOP_WORD:
@@ -136,6 +137,12 @@ class TelegramInteraction:
             if reply is None or reply.lower() == STOP_WORD or reply == ACCEPT_SUGGESTION:
                 return None
         return reply
+
+    def confirm_answer(self, question: str, answer: str) -> bool | None:
+        """A typed answer goes to Naukri the moment it is confirmed and cannot be taken back, so ask once."""
+        return self._ch.ask_yes_no(
+            f"Send this answer to Naukri?\n\nQ: {question}\nA: {answer}", self._answer_s, working="Sending"
+        )
 
     def confirm_submit(self, job: dict, questions: list[str], answers: list[str]) -> bool | None:
         lines = [f"Ready to submit: {job['title']} - {job['company']}", ""]

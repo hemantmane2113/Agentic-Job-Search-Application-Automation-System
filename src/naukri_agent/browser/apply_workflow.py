@@ -46,7 +46,7 @@ from naukri_agent.browser.apply_type import (  # noqa: F401 - detect_apply_type 
     detect_apply_type,
     is_marked_applied,
 )
-from naukri_agent.browser.models import ApplyQuestionPrompt, ApplySubmissionResult
+from naukri_agent.browser.models import ApplyQuestionPrompt, ApplySubmissionResult, LiveQuestion
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,30 @@ _LIST_QUESTIONS_POLL_INTERVAL_MS = 500
 _APPLIED_POLL_COUNT = 12
 _APPLIED_MARKER_WAIT_MS = 8000
 _CHOICE_POLL_COUNT = 10
+# After an answer is saved, wait up to this long for Naukri's bot to ask the next question (or the form to close) before
+# typing the next answer. Before this, four typed answers were sent in ONE second (23 Oct, Tiger Analytics) and Naukri
+# answered "There was an error while processing your job application".
+_NEXT_QUESTION_WAIT_MS = 12000
+_NEXT_QUESTION_POLL_MS = 300
+# Reading the form's own question (see read_live_question). Right after Apply is clicked the form takes a moment to appear, so
+# "gone" needs many looks in a row the first time (~5 s) and only two afterwards.
+_LIVE_WAIT_MS = 15000
+_FIRST_LOOK_ABSENT_POLLS = 16
+# Bot messages that are not a question: Naukri's bot says these when it did not accept what was typed. The question it is
+# waiting on is the last message that is NOT one of these (the saved panel of 2026-10-10 shows it replying "Sorry! I am not
+# trained to answer this query :(" to an answer typed for a question it had not asked).
+_BOT_NOISE_RE = re.compile(r"sorry|not trained|something went wrong|try again|did(?:n't| not) understand", re.I)
+# One look at the open form: the bot's messages in order, the choice labels on screen, and whether the free-text box is showing
+# (its container is hidden while a choice question is on screen). Returns null when there is no question drawer.
+_LIVE_JS = """(a) => {
+  const d = document.querySelector(a.drawer);
+  if (!d) return null;
+  const vis = (e) => !!(e && (e.offsetWidth || e.offsetHeight || (e.getClientRects && e.getClientRects().length)));
+  const bots = Array.from(document.querySelectorAll(a.bot)).map((e) => (e.innerText || '').trim());
+  const options = Array.from(document.querySelectorAll(a.choice)).filter(vis).map((e) => (e.innerText || '').trim());
+  const box = document.querySelector(a.text);
+  return { bots: bots, options: options, textVisible: vis(box) };
+}"""
 _FINAL_SUBMIT_CLICK_TIMEOUT_MS = 5000
 _APPLIED_QUICK_WAIT_MS = 4000
 _APPLIED_POLL_INTERVAL_MS = 1000
@@ -79,6 +103,10 @@ _APPLIED_TEXT_RE = re.compile(r"applied|application (has been )?(sent|submitte
 
 class ApplyAnswerError(Exception):
     """An answer could not be entered into the question panel (nothing was submitted)."""
+
+
+class FormChanged(ApplyAnswerError):
+    """The form is no longer asking the question the answer was meant for (it closed, or moved on). Nothing was typed."""
 
 
 def _exact_path(raw: str) -> str:
@@ -262,12 +290,143 @@ class ApplyWorkflowSession:
         self._known = {p.control_id: p for p in prompts if p.control_id}
         return prompts
 
-    def submit_answer(self, control_id: str, answer: str) -> None:
+    def _live_snapshot(self) -> dict | None:
+        try:
+            got = self._page.evaluate(
+                _LIVE_JS,
+                {"drawer": selectors.APPLY_DRAWER, "bot": selectors.APPLY_BOT_ITEM,
+                 "choice": selectors.APPLY_CHOICE_LABEL, "text": selectors.APPLY_DRAWER_TEXT_INPUT},
+            )
+        except Exception:  # noqa: BLE001 - mid-navigation, a closed page or a fake: no form to read
+            return None
+        return got if isinstance(got, dict) else None
+
+    @staticmethod
+    def _question_from(snapshot: dict) -> LiveQuestion | None:
+        """The question that is waiting for an answer, or None when nothing is (the bot is still typing, or the form is done)."""
+        bots = [str(t).strip() for t in snapshot.get("bots", []) if str(t).strip()]
+        question = next((t for t in reversed(bots) if not _BOT_NOISE_RE.search(t)), None)
+        if not question:
+            return None
+        options = [o for o in (str(x).strip() for x in snapshot.get("options", [])) if o]
+        if options:
+            return LiveQuestion(text=question, options=options, kind="choice")
+        if snapshot.get("textVisible"):
+            return LiveQuestion(text=question, options=[], kind="text")
+        return None
+
+    def read_live_question(self, wait_ms: int = _LIVE_WAIT_MS, first: bool = False) -> tuple[str, LiveQuestion | None]:
+        """What is the form asking right now? Returns ('question', q) once the same question has been on screen on two looks
+        in a row (so a new message never gets paired with the previous question's choices), ('closed', None) when the form is
+        gone, or ('timeout', None) when it shows nothing answerable in time. `first=True` right after Apply was clicked.
+        Never raises."""
+        absent_needed = _FIRST_LOOK_ABSENT_POLLS if first else 2
+        absent, waited = 0, 0
+        previous: LiveQuestion | None = None
+        while True:
+            snap = self._live_snapshot()
+            if snap is None:
+                absent += 1
+                previous = None
+                if absent >= absent_needed:
+                    return "closed", None
+            else:
+                absent = 0
+                current = self._question_from(snap)
+                if current is not None and current == previous:
+                    return "question", current
+                previous = current
+            if waited >= wait_ms:
+                # Nothing to answer: but a form that has finished may leave a "thank you" message instead of vanishing.
+                if is_marked_applied(self._page, wait_ms=1000):
+                    return "closed", None
+                return "timeout", None
+            try:
+                self._page.wait_for_timeout(_NEXT_QUESTION_POLL_MS)
+            except Exception:  # noqa: BLE001 - a page that cannot wait ends the look
+                return "timeout", None
+            waited += _NEXT_QUESTION_POLL_MS
+
+    def answer_live_question(self, expected: LiveQuestion, answer: str) -> str:
+        """Type or tap `answer` for `expected`, but ONLY if the form is still asking exactly that question (raises FormChanged,
+        having typed nothing, if it closed or moved on), then wait for Naukri's reply: 'next' | 'closed' | 'timeout'."""
+        state, now = self.read_live_question(wait_ms=3000)
+        if state == "closed" or now is None and state != "timeout":
+            raise FormChanged("Naukri's application form is no longer open")
+        if state != "question" or now is None or self._norm(now.text) != self._norm(expected.text):
+            raise FormChanged("Naukri is no longer asking that question")
+        _present, bots_before = self._drawer_state()
+        if now.kind == "choice":
+            self._tap_option(answer, now.options)
+        else:
+            self._answer_text(answer)
+        return self._wait_for_next_question(bots_before)
+
+    def _tap_option(self, answer: str, options: list[str]) -> None:
+        """Click the on-screen choice whose text is `answer`, then Save. Raises ApplyAnswerError, having clicked nothing, if
+        it is not one of the choices on screen."""
+        wanted = self._norm(answer)
+        if wanted not in {self._norm(o) for o in options}:
+            raise ApplyAnswerError(f"{answer!r} is not one of the choices on screen {options}")
+        for handle in self._page.query_selector_all(selectors.APPLY_CHOICE_LABEL):
+            try:
+                if handle.is_visible() and self._norm(handle.inner_text()) == wanted:
+                    handle.click()
+                    self._page.wait_for_timeout(400)  # Save is greyed out until a choice is made
+                    self._page.click(selectors.APPLY_DRAWER_SAVE)
+                    return
+            except ApplyAnswerError:
+                raise
+            except Exception:  # noqa: BLE001 - a label mid-redraw is skipped
+                continue
+        raise ApplyAnswerError(f"the choice {answer!r} could not be clicked")
+
+    def _drawer_state(self) -> tuple[bool, int]:
+        """(the question drawer is on screen, how many messages the bot has sent in it). (False, 0) when it cannot be read."""
+        try:
+            got = self._page.evaluate(
+                "([drawer, bot]) => { const d = document.querySelector(drawer); "
+                "return d ? [true, document.querySelectorAll(bot).length] : [false, 0]; }",
+                [selectors.APPLY_DRAWER, selectors.APPLY_BOT_ITEM],
+            )
+            return bool(got[0]), int(got[1])
+        except Exception:  # noqa: BLE001 - mid-navigation, a closed page or a fake: "cannot read" means "not there"
+            return False, 0
+
+    def _wait_for_next_question(self, bot_messages_before: int) -> str:
+        """After an answer has been saved: 'next' once the bot has asked something new, 'closed' once the form has gone
+        (Naukri finished, or skipped the rest), 'timeout' if neither happened in time. Never raises."""
+        waited = 0
+        absent = 0
+        while waited < _NEXT_QUESTION_WAIT_MS:
+            present, bots = self._drawer_state()
+            if present:
+                absent = 0
+                if bots > bot_messages_before:
+                    return "next"
+            else:
+                absent += 1
+                if absent >= 2:  # gone on two looks in a row, not just redrawing
+                    return "closed"
+            try:
+                self._page.wait_for_timeout(_NEXT_QUESTION_POLL_MS)
+            except Exception:  # noqa: BLE001 - a page that cannot wait just stops the wait
+                return "timeout"
+            waited += _NEXT_QUESTION_POLL_MS
+        return "timeout"
+
+    def submit_answer(self, control_id: str, answer: str) -> str:
+        """Enter ONE answer, then wait for Naukri to respond. Returns 'next', 'closed' (the form has finished or closed:
+        stop answering and check whether Naukri shows the job as Applied), 'timeout', or 'skipped' (Naukri never asked this
+        one and moved on)."""
+        _present, bots_before = self._drawer_state()
         known = self._known.get(control_id)
         if known is not None and known.options:
-            self._answer_choice(answer, known.options, control_id)
-            return
-        self._answer_text(answer)
+            if not self._answer_choice(answer, known.options, control_id):
+                return "skipped"
+        else:
+            self._answer_text(answer)
+        return self._wait_for_next_question(bots_before)
 
     def _answer_text(self, answer: str) -> None:
         """Type a free-text / number answer into the question panel and press its Save. Both selectors are
@@ -286,6 +445,13 @@ class ApplyWorkflowSession:
             self._page.click(selectors.APPLY_DRAWER_SAVE, timeout=5000)  # the drawer's own Save (verified for choices)
         except Exception:  # noqa: BLE001 - the older guess
             self._page.click(selectors.APPLY_NEXT_BUTTON)
+
+    def page_html(self) -> str | None:
+        """The whole page's HTML (capped), for diagnosing a failure when there is no question drawer to save."""
+        try:
+            return str(self._page.content())[:400_000]
+        except Exception:  # noqa: BLE001
+            return None
 
     def drawer_html(self) -> str | None:
         """The question drawer's HTML, for diagnosing a failure; None when there is no drawer or it cannot be read."""
@@ -325,7 +491,7 @@ class ApplyWorkflowSession:
                 return True
         return False
 
-    def _answer_choice(self, answer: str, options: list[str], control_id: str | None = None) -> None:
+    def _answer_choice(self, answer: str, options: list[str], control_id: str | None = None) -> bool:
         """Pick one option (radio or checkbox) in the question panel, then press its Save. Waits for the option to be on
         screen (a following question appears after the previous Save). Raises ApplyAnswerError, having clicked nothing,
         if the answer is not an offered option or never appears. If the panel is plainly asking a DIFFERENT question we
@@ -349,11 +515,12 @@ class ApplyWorkflowSession:
             if control_id is not None and self._panel_is_asking_another_question(self._visible_option_texts(), control_id):
                 logger.warning("apply_workflow: Naukri did not ask question %s; moving on to the next one", control_id)
                 self.skipped.append(control_id)
-                return
+                return False
             raise ApplyAnswerError(f"option {wanted!r} did not appear in the question panel")
         label.click()
         self._page.wait_for_timeout(400)  # Save is greyed out until an option is chosen
         self._page.click(selectors.APPLY_DRAWER_SAVE)
+        return True
 
     def skipped_question_texts(self) -> list[str]:
         return [self._known[c].question_text for c in self.skipped if c in self._known]

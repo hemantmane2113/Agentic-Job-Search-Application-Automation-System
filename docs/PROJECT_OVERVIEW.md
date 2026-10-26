@@ -123,6 +123,11 @@ can never approve the next job. Your tap is acknowledged within seconds even whi
 turns into one grey "Applying... please wait" (or "No - skipped") button, a No also gets a short "Skipped" message, and the
 usual "Applied: ..." message follows when Naukri confirms.
 
+The app asks you only the question Naukri's form is asking at that moment (Naukri's data may list seven, its form asks the ones it
+cannot fill from your profile or from earlier tries), sends your answer, waits for Naukri's reply, and repeats until the form
+closes; a typed answer gets a quick Yes/No first. Answers go in at Naukri's pace (the next one only after the bot has asked it), and if you took longer than a minute to answer on
+Telegram the app reopens Naukri's form and sends your saved answers at once, because a form left open for minutes errors or closes.
+A second job that needs a different resume gets a fresh browser first (the safety guard blocks uploads once a form has been opened).
 The apply panel is Naukri's chat widget. It is the least predictable part of the system: question types (radio buttons, text boxes,
 checkboxes) and even the order of questions vary, and Naukri sometimes skips a question. The code handles each type seen so far and
 reports a skipped question; a new type will show up as a clean stop with a saved snapshot.
@@ -166,7 +171,7 @@ free tier. Careers pages that show no text to an automated reader are flagged, a
 
 Three tiers, kept separate: unit tests (pure logic), mocked-browser tests (`tests/browser_fakes.py`, no real browser or network),
 and manual tests in `tests/manual/` that need a real Naukri account (`pytest -m manual`, excluded by default). Currently
-**1708 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
+**1771 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
 confirm is called out as UNVERIFIED in `selectors.py` until a real run proves it.
 
 ---

@@ -172,19 +172,57 @@ class NaukriClient(JobBoardClient):
             return False
 
     def save_failure_snapshot(self, prefix: Any) -> None:
-        """After a failed attempt: a screenshot and the question drawer's HTML, next to each other, so what the
-        page really looked like can be read off later. Never raises."""
+        """After a failed attempt: a screenshot and the HTML of what was on screen (the question drawer, or the whole page
+        when there is no drawer), next to each other, so what the page really looked like can be read off later (before,
+        a page without a drawer left only a picture). Never raises."""
         from pathlib import Path
 
         prefix = Path(str(prefix))
         try:
             prefix.parent.mkdir(parents=True, exist_ok=True)
             self.screenshot(prefix.with_name(prefix.name + ".png"))
-            html = self._get_apply_session().drawer_html()
+            session = self._get_apply_session()
+            html = session.drawer_html() or session.page_html()
             if html:
                 prefix.with_name(prefix.name + ".html").write_text(html, encoding="utf-8")
         except Exception:  # noqa: BLE001 - diagnostics must never hide the real error
             pass
+
+    def save_page_snapshot(self, prefix: Any) -> None:
+        """A screenshot and the whole page's HTML, e.g. the profile page after a resume upload that could not be
+        confirmed. Never raises."""
+        from pathlib import Path
+
+        prefix = Path(str(prefix))
+        try:
+            prefix.parent.mkdir(parents=True, exist_ok=True)
+            self.screenshot(prefix.with_name(prefix.name + ".png"))
+            html = self._get_apply_session().page_html()
+            if html:
+                prefix.with_name(prefix.name + ".html").write_text(html, encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def read_live_question(self, wait_ms: int = 15000, first: bool = False) -> tuple[str, Any]:
+        """What Naukri's form is asking right now: ('question', LiveQuestion) | ('closed', None) | ('timeout', None)."""
+        return self._get_apply_session().read_live_question(wait_ms, first)
+
+    def answer_live_question(self, expected: Any, answer: str) -> str:
+        """Answer `expected` only if the form is still asking it (raises FormChanged otherwise); returns next|closed|timeout."""
+        return self._get_apply_session().answer_live_question(expected, answer)
+
+    def reopen_application(self, job_url: str) -> list[ApplyQuestionPrompt]:
+        """Start this job's application form again from scratch and read its questions. Used when the person took a long
+        time to answer: Naukri's form, left open for minutes, errored or closed (23 and 26 Oct). Nothing was submitted
+        from the old form, so this only reloads the job page (plain GET), clicks Apply again and reads the questions."""
+        from naukri_agent.browser.apply_workflow import ApplyAnswerError
+
+        self.prepare_next_application()
+        self.open_job_page(job_url)
+        if self.detect_apply_type() != "native":
+            raise ApplyAnswerError("the job no longer shows a Naukri Apply button when the form was reopened")
+        self.click_apply()
+        return self.list_questions()
 
     def skipped_questions(self) -> list[str]:
         """Questions the app had an answer for that Naukri's panel never asked, for this application."""
@@ -209,8 +247,8 @@ class NaukriClient(JobBoardClient):
     def list_questions(self) -> list[ApplyQuestionPrompt]:
         return self._get_apply_session().list_questions()
 
-    def submit_answer(self, control_id: str, answer: str) -> None:
-        self._get_apply_session().submit_answer(control_id, answer)
+    def submit_answer(self, control_id: str, answer: str) -> str:
+        return self._get_apply_session().submit_answer(control_id, answer)
 
     def skip_question(self, control_id: str) -> None:
         self._get_apply_session().skip_question(control_id)

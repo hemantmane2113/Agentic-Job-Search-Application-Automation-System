@@ -27,10 +27,12 @@ Nothing here is reachable from run-daily/discover/the scheduler.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import logging
 import re
+import time
 import uuid
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
@@ -44,6 +46,162 @@ from naukri_agent.recommendations.employment import is_excluded
 logger = logging.getLogger(__name__)
 
 PARKED_NEEDS_HUMAN = "needs_human"
+
+_clock = time.monotonic  # replaced in tests
+
+
+def _norm(text: str) -> str:
+    return " ".join((text or "").split()).casefold()
+
+
+def _replay_plan(old_questions: list, answers: list[str], fresh_questions: list) -> list[tuple[Any, str]] | None:
+    """Pair each question on the REOPENED form with the answer the person already gave to the same question (matched by
+    its text). None when the reopened form asks something the person has not answered, or an answer is no longer one of
+    its options: then nothing is sent and the job is handed back. Fewer questions than before is fine: Naukri asks only
+    what it needs."""
+    by_text = {_norm(q.question_text): a for q, a in zip(old_questions, answers)}
+    plan: list[tuple[Any, str]] = []
+    for q in fresh_questions:
+        answer = by_text.get(_norm(q.question_text))
+        if answer is None:
+            return None
+        if q.options and answer not in q.options:
+            match = next((o for o in q.options if _norm(o) == _norm(answer)), None)
+            if match is None:
+                return None
+            answer = match
+        plan.append((q, answer))
+    return plan
+
+
+MAX_LIVE_QUESTIONS = 15  # a form that asks more than this is not one to answer from a phone
+_REOPEN_LIMIT = 2
+
+
+class _LiveFormResult(BaseModel):
+    texts: list[str] = Field(default_factory=list)
+    answers: list[str] = Field(default_factory=list)
+    detail: list[dict] = Field(default_factory=list)  # what was asked, how it was answered (for the evidence file)
+    reopened: bool = False
+    handback: str | None = None  # why nothing more was done and the job goes back to the person
+    check_applied: bool = False  # the form (not the person) stopped things: look at Naukri's own page before handing back
+
+
+def _live_suggestion(text: str, options: list[str], candidate: Any, experience: Any, answer_from_profile: Any) -> str | None:
+    """The profile's answer to the question on screen, offered to the person as a suggestion only (never sent unasked)."""
+    answer = answer_from_profile(text, candidate, experience).answer
+    if not answer:
+        return None
+    if not options or answer in options:
+        return answer
+    return next((o for o in options if _norm(o) == _norm(answer)), None)
+
+
+def _follow_live_form(
+    client: Any, interaction: Any, settings: Settings, job: dict, candidate: Any, experience: Any, answer_from_profile: Any
+) -> _LiveFormResult:
+    """Answer the questions Naukri's form REALLY asks, one at a time, like a person applying by hand.
+
+    Naukri's question list names every question the employer set, but its form asks only what it cannot fill from the profile
+    or from earlier tries (23 Oct, Tiger Analytics: 7 listed, 1 asked), so answering the list typed answers into questions the
+    form never asked, in a burst, and the form errored or lost answers. Here: read the question on screen, ask the person only
+    that, send the answer only if the form is STILL asking that question, wait for Naukri's reply, repeat until the form
+    closes. Anything unexpected hands the job back instead of guessing. Never raises for the expected problems."""
+    from naukri_agent.browser.apply_workflow import FormChanged
+
+    out = _LiveFormResult()
+    saved: dict[str, str] = {}  # question text -> the answer the person already gave (kept across a reopened form)
+    last_key: str | None = None
+    repeats = reopens = 0
+    use_saved = False
+    first = True
+    for _step in range(MAX_LIVE_QUESTIONS + 3 * _REOPEN_LIMIT + 3):
+        state, live = client.read_live_question(first=first)
+        first = False
+        if state == "closed":
+            return out  # Naukri has nothing more to ask: the caller checks that the job now shows as Applied
+        if state != "question" or live is None:
+            out.handback, out.check_applied = "Naukri's form is open but is not asking anything I can answer", True
+            return out
+        logger.info("live form: Naukri is asking %r (%s%s)", live.text[:140], live.kind,
+                    f", {len(live.options)} choices" if live.options else "")  # the question only, never the answer
+        key = _norm(live.text)
+        repeats = repeats + 1 if key == last_key else 0
+        last_key = key
+        if repeats >= 2:
+            out.handback, out.check_applied = f"Naukri keeps asking {live.text!r}; it did not accept the answer", True
+            return out
+        answer, source = (saved.get(key) if use_saved and repeats == 0 else None), "saved"
+        if answer is None:
+            if len(out.texts) >= MAX_LIVE_QUESTIONS:
+                out.handback, out.check_applied = f"Naukri asked more than {MAX_LIVE_QUESTIONS} questions", True
+                return out
+            suggestion = _live_suggestion(live.text, live.options, candidate, experience, answer_from_profile)
+            reply = interaction.ask_question(
+                len(out.texts) + 1, 0, live.text, suggestion, options=list(live.options) or None
+            )
+            if reply is None:
+                out.handback = "no answer was given on Telegram"
+                return out
+            if live.kind == "text":  # a typed answer cannot be taken back once sent, so confirm it
+                ok = interaction.confirm_answer(live.text, reply)
+                if not ok:
+                    out.handback = "the typed answer was not confirmed" if ok is False else "no reply to the confirmation"
+                    return out
+            answer, source = reply, "telegram"
+            saved[key] = answer
+        use_saved = False
+        try:
+            status = client.answer_live_question(live, answer)
+        except FormChanged as exc:
+            if reopens >= _REOPEN_LIMIT:
+                out.handback, out.check_applied = f"Naukri's form changed while waiting for the answer ({exc})", True
+                return out
+            reopens += 1
+            interaction.notify("Naukri's form closed or moved on while you were answering, so I am reopening it and "
+                               "sending your answer now - please wait.")
+            client.reopen_application(job["url"])  # Naukri keeps the answers it already has, so this asks only what is left
+            out.reopened = True
+            use_saved, first, last_key, repeats = True, True, None, 0
+            continue
+        logger.info("live form: answer sent (%s); Naukri's form says: %s", source, status)
+        out.texts.append(live.text)
+        out.answers.append(answer)
+        out.detail.append({"question": live.text, "kind": live.kind, "options": live.options, "answer": answer,
+                           "source": source, "form_reply": status})
+        if status == "closed":
+            return out
+    out.handback, out.check_applied = "Naukri's form did not finish after many steps", True
+    return out
+
+
+def _write_form_evidence(path: Any, questions: list, live: _LiveFormResult) -> None:
+    """What Naukri's data listed versus what its form actually asked, so a surprise can be explained later. Local file only."""
+    try:
+        path.write_text(
+            json.dumps(
+                {
+                    "listed_by_naukri": [
+                        {"id": q.control_id, "text": q.question_text, "type": q.question_type, "skippable": q.skippable,
+                         "options": q.options}
+                        for q in questions
+                    ],
+                    "asked_by_the_form": live.detail,
+                    "reopened": live.reopened,
+                    "handed_back": live.handback,
+                },
+                indent=2, ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001 - evidence must never fail an application
+        pass
+
+
+def _describe_unplaced(placed: Any) -> str:
+    """What Naukri's profile showed when a resume upload could not be confirmed (file names only)."""
+    shown = getattr(placed, "after_filename", None) or getattr(placed, "before_filename", None) or "no resume"
+    return f"Naukri shows: {shown}; {getattr(placed, 'note', None) or 'no further note'}"
 
 
 class AutoApplyOutcome(BaseModel):
@@ -282,8 +440,11 @@ def run_auto_apply(
         interaction.send_approval(first)
         pre_sent = first["job_id"]
     on_profile: str | None = None  # resume id verified on the Naukri profile during this run
+    opener = open_client or _open_naukri_client
+    session_armed = False  # an application form was opened in THIS browser session (the network guard is now armed)
     try:
-        with (open_client or _open_naukri_client)(settings) as client:
+        with contextlib.ExitStack() as stack:
+            client = stack.enter_context(opener(settings))
             for job in candidates[:max_attempts]:
                 job = {**job, "your_years": candidate.years_experience}
                 if result.applied >= remaining:
@@ -321,10 +482,26 @@ def run_auto_apply(
                     # job's role there first (only after the Yes: a "no" never touches the profile).
                     # If it cannot be confirmed, nothing is applied - never the wrong resume.
                     if job.get("resume_file") and on_profile != job.get("resume_id"):
+                        if session_armed:
+                            # The network guard that protects the application form stays armed for the rest of a browser
+                            # session, and it blocks the resume upload too (21 Oct: Eduitalent). A fresh browser has no guard.
+                            logger.info("starting a fresh browser to change the profile resume (the guard is armed in this one)")
+                            stack.close()
+                            client = stack.enter_context(opener(settings))
+                            session_armed = False
                         placed = client.ensure_profile_resume(job["resume_file"])
                         if not placed.verified:
+                            why = _describe_unplaced(placed)
+                            logger.warning("resume change not confirmed for job %s: %s", job["job_id"], why)
+                            snapshot = getattr(client, "save_page_snapshot", None)
+                            if snapshot is not None:  # what the profile page really showed, to read later
+                                try:
+                                    shots.mkdir(parents=True, exist_ok=True)
+                                    snapshot(shots / f"{attempt_id}_resume")
+                                except Exception:  # noqa: BLE001 - diagnostics never hide the real outcome
+                                    pass
                             record(job, attempt_id, "failed",
-                                   f"could not put the {job.get('resume_id')} resume on the profile; nothing was applied")
+                                   f"could not put the {job.get('resume_id')} resume on the profile ({why}); nothing was applied")
                             result.stopped_reason = "could not set the resume; stopped (nothing applied with a wrong resume)"
                             break
                         on_profile = job["resume_id"]
@@ -332,8 +509,12 @@ def run_auto_apply(
                     client.prepare_next_application()
                     pause(settings.apply_pause_min_seconds, settings.apply_pause_max_seconds)
                     clicked = True
+                    session_armed = True
                     client.click_apply()
                     questions = client.list_questions()
+                    opened_at = _clock()
+                    reopened = False
+                    live_done, live_reopened = False, False
                     fields = client.application_question_field_count() if not questions else 0
 
                     texts = [q.question_text for q in questions]
@@ -364,28 +545,72 @@ def run_auto_apply(
                         if not questions and (fields != 0 or panel):
                             record(job, attempt_id, PARKED_NEEDS_HUMAN, unreadable)
                             continue
-                        final_answers = []
-                        for i, (q, t, a) in enumerate(zip(questions, texts, answers), start=1):
-                            reply = interaction.ask_question(i, len(texts), t, a.answer, options=list(q.options))
-                            if reply is None:
-                                break
-                            final_answers.append(reply)
-                        if len(final_answers) < len(texts):
-                            record(job, attempt_id, PARKED_NEEDS_HUMAN,
-                                   "no answer was given on Telegram", texts, final_answers)
-                            continue
-                        # A tap on a choice button IS the confirmation (the prompt says so), so
-                        # no second Yes/No. Typed answers still get one: a typo is easy to make
-                        # on a phone and impossible to take back.
-                        if questions and not all(q.options for q in questions):
-                            confirmed = interaction.confirm_submit(job, texts, final_answers)
-                            if not confirmed:
-                                record(job, attempt_id, "declined" if confirmed is False else "no_reply",
-                                       "answers were not confirmed; nothing was submitted", texts, final_answers)
+                        if questions and settings.apply_follow_live_form and hasattr(client, "read_live_question"):
+                            live = _follow_live_form(client, interaction, settings, job, candidate, experience, answer_from_profile)
+                            shots.mkdir(parents=True, exist_ok=True)
+                            _write_form_evidence(shots / f"{attempt_id}_form.json", questions, live)
+                            texts, final_answers = live.texts, live.answers
+                            if live.handback and live.check_applied:
+                                # The form stopped asking (or kept asking) - but it may simply have finished. Naukri's own page
+                                # decides; if it shows the job as Applied this is not a handback at all.
+                                if client.confirm_application_after_answers(job["url"]).submitted:
+                                    live.handback = None
+                            if live.handback:
+                                snapshot = getattr(client, "save_failure_snapshot", None)
+                                if snapshot is not None:
+                                    snapshot(shots / f"{attempt_id}_failure")
+                                kept = "; the answers already sent are kept by Naukri, so applying by hand asks only what is left" if live.answers else ""
+                                record(job, attempt_id, PARKED_NEEDS_HUMAN, live.handback + kept, texts, final_answers)
                                 continue
+                            live_done, live_reopened = True, live.reopened
+                        else:
+                            final_answers = []
+                            for i, (q, t, a) in enumerate(zip(questions, texts, answers), start=1):
+                                reply = interaction.ask_question(i, len(texts), t, a.answer, options=list(q.options))
+                                if reply is None:
+                                    break
+                                final_answers.append(reply)
+                            if len(final_answers) < len(texts):
+                                record(job, attempt_id, PARKED_NEEDS_HUMAN,
+                                       "no answer was given on Telegram", texts, final_answers)
+                                continue
+                            # A tap on a choice button IS the confirmation (the prompt says so), so
+                            # no second Yes/No. Typed answers still get one: a typo is easy to make
+                            # on a phone and impossible to take back.
+                            if questions and not all(q.options for q in questions):
+                                confirmed = interaction.confirm_submit(job, texts, final_answers)
+                                if not confirmed:
+                                    record(job, attempt_id, "declined" if confirmed is False else "no_reply",
+                                           "answers were not confirmed; nothing was submitted", texts, final_answers)
+                                    continue
 
-                    for q, ans in zip(questions, final_answers):
-                        client.submit_answer(q.control_id or "", ans)
+                    to_send = [] if live_done else list(zip(questions, final_answers))
+                    waited = _clock() - opened_at
+                    if (
+                        interaction is not None and to_send and settings.apply_panel_max_wait_seconds
+                        and waited > settings.apply_panel_max_wait_seconds
+                    ):
+                        # Naukri's form errors or closes if it sits open while the person answers on Telegram. Their answers
+                        # are saved here, so open a fresh form and send them straight away.
+                        logger.info("answers took %.0f s; reopening the application form before sending them", waited)
+                        interaction.notify("Your answers are in. Naukri's form was open a while, so I am reopening it to "
+                                           "send them now - please wait.")
+                        fresh = client.reopen_application(job["url"])
+                        plan = _replay_plan(questions, final_answers, fresh)
+                        if plan is None:
+                            record(job, attempt_id, PARKED_NEEDS_HUMAN,
+                                   "Naukri's form asked different questions when it was reopened, so nothing was sent; "
+                                   "please finish this one yourself", texts, final_answers)
+                            continue
+                        to_send, reopened = plan, True
+
+                    unsent: list[str] = []
+                    for position, (q, ans) in enumerate(to_send):
+                        status = client.submit_answer(q.control_id or "", ans)
+                        if status == "closed" and position < len(to_send) - 1:
+                            # Naukri finished the form early (as with Aaum Research on 22 Oct): the rest were never asked.
+                            unsent = [item[0].question_text for item in to_send[position + 1:]]
+                            break
 
                     shots.mkdir(parents=True, exist_ok=True)
                     client.screenshot(shots / f"{attempt_id}_before_submit.png")
@@ -399,6 +624,19 @@ def run_auto_apply(
                     skipped = list(getattr(client, "skipped_questions", lambda: [])())
                     if skipped:  # Naukri did not ask these, so nothing was sent for them; say so
                         submission.notes.append("Naukri did not ask: " + "; ".join(q[:80] for q in skipped))
+                    if unsent:
+                        submission.notes.append("Naukri finished the form before asking: " + "; ".join(q[:80] for q in unsent))
+                    if reopened:
+                        submission.notes.append(
+                            f"answers were sent into a freshly reopened form (they took {waited:.0f} s to collect)"
+                        )
+                    if live_done:
+                        if len(texts) != len(questions):
+                            submission.notes.append(
+                                f"Naukri's form asked {len(texts)} of the {len(questions)} questions in its list"
+                            )
+                        if live_reopened:
+                            submission.notes.append("the form was reopened while you were answering; your answer went into the fresh form")
                     client.screenshot(shots / f"{attempt_id}_after_submit.png")
 
                     if not submission.submitted:

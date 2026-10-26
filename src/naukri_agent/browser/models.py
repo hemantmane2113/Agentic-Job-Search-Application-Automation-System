@@ -36,6 +36,15 @@ class ResumeState(BaseModel):
     remove_control_present: bool = False
 
 
+class LiveQuestion(BaseModel):
+    """The question Naukri's application form is asking at this moment, read from the form itself (not from the question
+    list in Naukri's data, which names every question the employer set, including many the form never asks)."""
+
+    text: str
+    options: list[str] = Field(default_factory=list)  # the choices on screen; empty for a typed answer
+    kind: str  # "choice" (tap one of `options`) | "text" (type an answer)
+
+
 class ResumeUploadResult(BaseModel):
     """What the profile's resume section showed before and after one upload."""
 
