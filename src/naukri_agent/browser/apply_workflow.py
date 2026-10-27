@@ -72,7 +72,7 @@ _APPLIED_POLL_COUNT = 12
 _APPLIED_MARKER_WAIT_MS = 8000
 _CHOICE_POLL_COUNT = 10
 # After an answer is saved, wait up to this long for Naukri's bot to ask the next question (or the form to close) before
-# typing the next answer. Before this, four typed answers were sent in ONE second (23 Oct, Tiger Analytics) and Naukri
+# typing the next answer. Before this, four typed answers were sent in ONE second (23 Oct, Acme Analytics) and Naukri
 # answered "There was an error while processing your job application".
 _NEXT_QUESTION_WAIT_MS = 12000
 _NEXT_QUESTION_POLL_MS = 300

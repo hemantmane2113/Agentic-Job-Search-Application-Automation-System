@@ -103,7 +103,7 @@ def _follow_live_form(
     """Answer the questions Naukri's form REALLY asks, one at a time, like a person applying by hand.
 
     Naukri's question list names every question the employer set, but its form asks only what it cannot fill from the profile
-    or from earlier tries (23 Oct, Tiger Analytics: 7 listed, 1 asked), so answering the list typed answers into questions the
+    or from earlier tries (23 Oct, Acme Analytics: 7 listed, 1 asked), so answering the list typed answers into questions the
     form never asked, in a burst, and the form errored or lost answers. Here: read the question on screen, ask the person only
     that, send the answer only if the form is STILL asking that question, wait for Naukri's reply, repeat until the form
     closes. Anything unexpected hands the job back instead of guessing. Never raises for the expected problems."""
@@ -484,7 +484,7 @@ def run_auto_apply(
                     if job.get("resume_file") and on_profile != job.get("resume_id"):
                         if session_armed:
                             # The network guard that protects the application form stays armed for the rest of a browser
-                            # session, and it blocks the resume upload too (21 Oct: Eduitalent). A fresh browser has no guard.
+                            # session, and it blocks the resume upload too (21 Oct: Contoso Talent). A fresh browser has no guard.
                             logger.info("starting a fresh browser to change the profile resume (the guard is armed in this one)")
                             stack.close()
                             client = stack.enter_context(opener(settings))
@@ -608,7 +608,7 @@ def run_auto_apply(
                     for position, (q, ans) in enumerate(to_send):
                         status = client.submit_answer(q.control_id or "", ans)
                         if status == "closed" and position < len(to_send) - 1:
-                            # Naukri finished the form early (as with Aaum Research on 22 Oct): the rest were never asked.
+                            # Naukri finished the form early (as with Initech Research on 22 Oct): the rest were never asked.
                             unsent = [item[0].question_text for item in to_send[position + 1:]]
                             break
 

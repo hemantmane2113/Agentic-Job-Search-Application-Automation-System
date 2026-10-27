@@ -3,7 +3,7 @@
 For anyone reading this codebase for the first time, or coming back after a break: **what the system does, why it is built
 this way, and how the pieces fit**. It describes the system as of October 2026.
 
-Companions: `README.md` (setup and running), `CLAUDE.md` (working rules and notes for a coding session), the module docstrings
+Companions: `README.md` (the front page), `docs/SETUP.md`, `docs/OPERATIONS.md` and `docs/TROUBLESHOOTING.md` (setup, running and fixing), `CLAUDE.md` (working rules and notes for a coding session), the module docstrings
 (each explains *why* its module exists), and `docs/architecture.html` (the system map) and `workflow-diagrams/*.html` (the workflow diagrams, including how the phone is kept reachable).
 
 ---

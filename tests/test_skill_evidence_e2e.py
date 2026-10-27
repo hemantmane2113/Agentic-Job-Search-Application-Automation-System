@@ -57,7 +57,7 @@ from .digest_fakes import in_memory_factory, settings
 
 # --- Real, persisted job.description text (Run 19, jobs 66 and 8) ---------
 
-GENERAC_DESCRIPTION = """Work Experience
+OSCORP_DESCRIPTION = """Work Experience
 
 02 years of experience in data science, analytics, or a related analytical role.
 Experience with building agents using Microsoft CoPilot, and other solution paths or equivalent
@@ -72,7 +72,7 @@ Experience using SQL and at least one programming language such as Python or R f
 Familiarity with Agentic AI, Chatbots, Operational AI applications
 Familiarity with version control tools (e.g., Git) and collaborative development practices."""
 
-ORIGIN_HR_DESCRIPTION = """Master s or Ph.D. degree in Statistics, Mathematics, Computer Science, Data Science.
+INITRODE_HR_DESCRIPTION = """Master s or Ph.D. degree in Statistics, Mathematics, Computer Science, Data Science.
 
 Strong coding skills in Python or R, with extensive use of scientific computing libraries.
 
@@ -184,25 +184,25 @@ def _extraction_json(required, preferred):
     })
 
 
-_GENERAC_LLM_JSON = _extraction_json(
+_OSCORP_LLM_JSON = _extraction_json(
     ["SQL", "Python", "R"], ["Agentic AI", "Chatbots", "Operational AI"]
 )
-_ORIGIN_HR_LLM_JSON = _extraction_json(
+_INITRODE_HR_LLM_JSON = _extraction_json(
     ["Python", "R", "SQL", "Deep Learning", "NLP", "Generative AI"], ["MLOps"]
 )
 
-_GENERAC_SPEC = dict(
-    slug="generac", ext="900101", title="Data Scientist", company="Generac Captiva",
-    description=GENERAC_DESCRIPTION,
+_OSCORP_SPEC = dict(
+    slug="oscorp", ext="900101", title="Data Scientist", company="Oscorp Captiva",
+    description=OSCORP_DESCRIPTION,
     # Deliberately includes a genuine conflict (SQL: DOM says preferred,
     # LLM says required) and a no-icon chip (Databricks) to validate the
     # "no-icon must not become required" rule through the real pipeline.
     ld_json_skills=["SQL", "Python", "R", "AWS", "Azure", "Databricks", "Agentic AI"],
     key_skills_dom=[("SQL", True), ("Databricks", False), ("Python", False)],
 )
-_ORIGIN_HR_SPEC = dict(
-    slug="originhr", ext="900102", title="Data Scientist", company="Origin Hr",
-    description=ORIGIN_HR_DESCRIPTION,
+_INITRODE_HR_SPEC = dict(
+    slug="initrodehr", ext="900102", title="Data Scientist", company="Initrode Hr",
+    description=INITRODE_HR_DESCRIPTION,
 )
 
 
@@ -211,14 +211,14 @@ def _run(tmp_path, *, now=None):
     cfg = settings(tmp_path, threshold_review=0, threshold_accept=100)
     factory = in_memory_factory()
     llm = _PerJobLLM({
-        "JD for generac": _GENERAC_LLM_JSON,  # unused key kept harmless
-        GENERAC_DESCRIPTION[:40]: _GENERAC_LLM_JSON,
-        ORIGIN_HR_DESCRIPTION[:40]: _ORIGIN_HR_LLM_JSON,
+        "JD for oscorp": _OSCORP_LLM_JSON,  # unused key kept harmless
+        OSCORP_DESCRIPTION[:40]: _OSCORP_LLM_JSON,
+        INITRODE_HR_DESCRIPTION[:40]: _INITRODE_HR_LLM_JSON,
     })
     result = run_daily_recommendations(
         cfg,
         now=now or datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
-        discover_fn=_fake_discover_with_raw_evidence([_GENERAC_SPEC, _ORIGIN_HR_SPEC]),
+        discover_fn=_fake_discover_with_raw_evidence([_OSCORP_SPEC, _INITRODE_HR_SPEC]),
         extraction_provider=llm,
         session_factory=factory,
     )
@@ -233,8 +233,8 @@ def test_e2e_raw_evidence_persisted_with_correct_preferred_semantics(tmp_path):
     assert result.status == "COMPLETED"
 
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        raw = s.query(JobRawSkillEvidence).filter_by(job_id=generac.id).all()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        raw = s.query(JobRawSkillEvidence).filter_by(job_id=oscorp.id).all()
 
         ld_json_rows = {r.skill_text: r.preferred for r in raw if r.source == "ld_json"}
         assert ld_json_rows == {
@@ -246,7 +246,7 @@ def test_e2e_raw_evidence_persisted_with_correct_preferred_semantics(tmp_path):
         assert dom_rows == {"SQL": True, "Databricks": False, "Python": False}
 
         # every raw row belongs to the ACTUAL fetched Job.id
-        assert all(r.job_id == generac.id for r in raw)
+        assert all(r.job_id == oscorp.id for r in raw)
 
 
 def test_e2e_rerunning_replacement_does_not_create_duplicates(tmp_path):
@@ -254,18 +254,18 @@ def test_e2e_rerunning_replacement_does_not_create_duplicates(tmp_path):
     cfg = settings(tmp_path, threshold_review=0, threshold_accept=100)
     factory = in_memory_factory()
     llm = _PerJobLLM({
-        GENERAC_DESCRIPTION[:40]: _GENERAC_LLM_JSON,
-        ORIGIN_HR_DESCRIPTION[:40]: _ORIGIN_HR_LLM_JSON,
+        OSCORP_DESCRIPTION[:40]: _OSCORP_LLM_JSON,
+        INITRODE_HR_DESCRIPTION[:40]: _INITRODE_HR_LLM_JSON,
     })
-    discover = _fake_discover_with_raw_evidence([_GENERAC_SPEC, _ORIGIN_HR_SPEC])
+    discover = _fake_discover_with_raw_evidence([_OSCORP_SPEC, _INITRODE_HR_SPEC])
 
     run_daily_recommendations(
         cfg, now=datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
         discover_fn=discover, extraction_provider=llm, session_factory=factory,
     )
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        first_count = s.query(JobRawSkillEvidence).filter_by(job_id=generac.id).count()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        first_count = s.query(JobRawSkillEvidence).filter_by(job_id=oscorp.id).count()
 
     # re-run the SAME "discovery" (same job, same raw evidence spec) a
     # second time -- the real discover_fn is called again by a second
@@ -275,15 +275,15 @@ def test_e2e_rerunning_replacement_does_not_create_duplicates(tmp_path):
         discover_fn=discover, extraction_provider=llm, session_factory=factory,
     )
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        second_count = s.query(JobRawSkillEvidence).filter_by(job_id=generac.id).count()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        second_count = s.query(JobRawSkillEvidence).filter_by(job_id=oscorp.id).count()
         assert second_count == first_count  # replaced, not doubled
 
 
 # --- 3. tier precedence, through the real pipeline ----------------------
 
 
-def test_e2e_tier_precedence_generac(tmp_path):
+def test_e2e_tier_precedence_oscorp(tmp_path):
     """Tier 0 (DOM authority) was REMOVED 2026-09-11 after the Run 20
     empirical validation -- Key Skills DOM is content-only now,
     regardless of its preferred flag. SQL's DOM preferred=True must
@@ -293,8 +293,8 @@ def test_e2e_tier_precedence_generac(tmp_path):
     only as corroboration."""
     result, factory = _run(tmp_path)
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        extraction = s.query(JobExtraction).filter_by(job_id=generac.id, is_current=True).one()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        extraction = s.query(JobExtraction).filter_by(job_id=oscorp.id, is_current=True).one()
         rows = {
             r.skill_key: r for r in
             s.query(JobExtractionSkillEvidence).filter_by(job_extraction_id=extraction.id).all()
@@ -353,8 +353,8 @@ def test_e2e_dom_true_flag_alone_never_wins_the_classification(tmp_path):
     pipeline code, not just the standalone merge function."""
     result, factory = _run(tmp_path)
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        extraction = s.query(JobExtraction).filter_by(job_id=generac.id, is_current=True).one()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        extraction = s.query(JobExtraction).filter_by(job_id=oscorp.id, is_current=True).one()
         row = {
             r.skill_key: r for r in
             s.query(JobExtractionSkillEvidence).filter_by(job_extraction_id=extraction.id).all()
@@ -362,10 +362,10 @@ def test_e2e_dom_true_flag_alone_never_wins_the_classification(tmp_path):
         assert row.winning_source != "key_skills_dom"
 
 
-def test_e2e_tier_precedence_origin_hr_llm_used_when_no_stronger_evidence(tmp_path):
+def test_e2e_tier_precedence_initrode_hr_llm_used_when_no_stronger_evidence(tmp_path):
     result, factory = _run(tmp_path)
     with session_scope(factory) as s:
-        origin = s.query(Job).filter(Job.url.like("%originhr%")).one()
+        origin = s.query(Job).filter(Job.url.like("%initrodehr%")).one()
         extraction = s.query(JobExtraction).filter_by(job_id=origin.id, is_current=True).one()
         rows = {
             r.skill_key: r for r in
@@ -391,8 +391,8 @@ def test_e2e_dom_true_flag_no_longer_creates_a_false_conflict(tmp_path):
     present in contributing_sources."""
     result, factory = _run(tmp_path)
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        extraction = s.query(JobExtraction).filter_by(job_id=generac.id, is_current=True).one()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        extraction = s.query(JobExtraction).filter_by(job_id=oscorp.id, is_current=True).one()
         sql_row = (
             s.query(JobExtractionSkillEvidence)
             .filter_by(job_extraction_id=extraction.id, skill_key="sql")
@@ -416,7 +416,7 @@ def test_e2e_dom_true_flag_no_longer_creates_a_false_conflict(tmp_path):
 def test_e2e_genuine_deterministic_vs_llm_conflict_remains_visible(tmp_path):
     """Conflicts are still fully possible and fully auditable -- just no
     longer sourced from DOM. Here the fake LLM deliberately misclassifies
-    Python as 'preferred' while Generac's real JD text carries an explicit
+    Python as 'preferred' while Oscorp's real JD text carries an explicit
     deterministic marker ("Experience using SQL and at least one
     programming language such as Python or R...") calling it required;
     the deterministic (tier 1) classification must win, and the conflict
@@ -425,11 +425,11 @@ def test_e2e_genuine_deterministic_vs_llm_conflict_remains_visible(tmp_path):
     cfg = settings(tmp_path, threshold_review=0, threshold_accept=100)
     factory = in_memory_factory()
     llm = _PerJobLLM({
-        GENERAC_DESCRIPTION[:40]: _extraction_json(["SQL", "R"], ["Python"]),
+        OSCORP_DESCRIPTION[:40]: _extraction_json(["SQL", "R"], ["Python"]),
     })
     run_daily_recommendations(
         cfg, now=datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
-        discover_fn=_fake_discover_with_raw_evidence([_GENERAC_SPEC]),
+        discover_fn=_fake_discover_with_raw_evidence([_OSCORP_SPEC]),
         extraction_provider=llm, session_factory=factory,
     )
     with session_scope(factory) as s:
@@ -457,8 +457,8 @@ def test_e2e_genuine_deterministic_vs_llm_conflict_remains_visible(tmp_path):
 def test_e2e_projection_matches_job_extraction_fields_exactly(tmp_path):
     result, factory = _run(tmp_path)
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        extraction = s.query(JobExtraction).filter_by(job_id=generac.id, is_current=True).one()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        extraction = s.query(JobExtraction).filter_by(job_id=oscorp.id, is_current=True).one()
 
         merged_rows = (
             s.query(JobExtractionSkillEvidence)
@@ -479,9 +479,9 @@ def test_e2e_projection_matches_job_extraction_fields_exactly(tmp_path):
 def test_e2e_derived_rows_correspond_to_the_exact_extraction_id(tmp_path):
     result, factory = _run(tmp_path)
     with session_scope(factory) as s:
-        generac = s.query(Job).filter(Job.url.like("%generac%")).one()
-        origin = s.query(Job).filter(Job.url.like("%originhr%")).one()
-        gen_ext = s.query(JobExtraction).filter_by(job_id=generac.id, is_current=True).one()
+        oscorp = s.query(Job).filter(Job.url.like("%oscorp%")).one()
+        origin = s.query(Job).filter(Job.url.like("%initrodehr%")).one()
+        gen_ext = s.query(JobExtraction).filter_by(job_id=oscorp.id, is_current=True).one()
         org_ext = s.query(JobExtraction).filter_by(job_id=origin.id, is_current=True).one()
 
         gen_rows = s.query(JobExtractionSkillEvidence).filter_by(job_extraction_id=gen_ext.id).all()
@@ -489,7 +489,7 @@ def test_e2e_derived_rows_correspond_to_the_exact_extraction_id(tmp_path):
 
         assert all(r.job_extraction_id == gen_ext.id for r in gen_rows)
         assert all(r.job_extraction_id == org_ext.id for r in org_rows)
-        assert {r.skill_key for r in gen_rows}.isdisjoint({"mlops"})  # Generac never saw MLOps
+        assert {r.skill_key for r in gen_rows}.isdisjoint({"mlops"})  # Oscorp never saw MLOps
         assert "mlops" in {r.skill_key for r in org_rows}
 
 
@@ -509,11 +509,11 @@ def test_e2e_two_extraction_versions_have_separate_immutable_evidence(tmp_path):
     cfg = settings(tmp_path, threshold_review=0, threshold_accept=100)
     factory = in_memory_factory()
 
-    spec_v1 = dict(_GENERAC_SPEC)
+    spec_v1 = dict(_OSCORP_SPEC)
     discover_v1 = _fake_discover_with_raw_evidence([spec_v1])
 
     # version 1: LLM returns a NARROWER required list
-    llm_v1 = _PerJobLLM({GENERAC_DESCRIPTION[:40]: _extraction_json(["SQL", "Python"], [])})
+    llm_v1 = _PerJobLLM({OSCORP_DESCRIPTION[:40]: _extraction_json(["SQL", "Python"], [])})
     run_daily_recommendations(
         cfg, now=datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC),
         discover_fn=discover_v1, extraction_provider=llm_v1, session_factory=factory,
@@ -535,10 +535,10 @@ def test_e2e_two_extraction_versions_have_separate_immutable_evidence(tmp_path):
     # presence in v2-but-not-v1 unambiguously reflects the different
     # extraction, not deterministic vocabulary recovery (which found
     # "R" independently in BOTH versions regardless of the LLM's list).
-    spec_v2 = dict(_GENERAC_SPEC, description=GENERAC_DESCRIPTION + "\n\nRe-posted with updated requirements.")
+    spec_v2 = dict(_OSCORP_SPEC, description=OSCORP_DESCRIPTION + "\n\nRe-posted with updated requirements.")
     discover_v2 = _fake_discover_with_raw_evidence([spec_v2])
     llm_v2 = _PerJobLLM({
-        GENERAC_DESCRIPTION[:40]: _extraction_json(["SQL", "Python", "Kubernetes"], [])
+        OSCORP_DESCRIPTION[:40]: _extraction_json(["SQL", "Python", "Kubernetes"], [])
     })
     run_daily_recommendations(
         cfg, now=datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC),
@@ -585,7 +585,7 @@ def test_e2e_extraction_and_derived_evidence_roll_back_together(tmp_path):
     with session_scope(session_factory) as session:
         job, _ = upsert_job(session, JobCreate(
             title="Data Scientist", company="Acme", location="Pune",
-            description=GENERAC_DESCRIPTION, url=fixed_url,
+            description=OSCORP_DESCRIPTION, url=fixed_url,
         ))
         job_id = job.id
 
@@ -597,7 +597,7 @@ def test_e2e_extraction_and_derived_evidence_roll_back_together(tmp_path):
                 .JobExtractionCreate(required_skills=["SQL", "Python"]),
             )
             _raw, merged = build_skill_evidence(
-                required_skills=["SQL", "Python"], description=GENERAC_DESCRIPTION,
+                required_skills=["SQL", "Python"], description=OSCORP_DESCRIPTION,
                 candidate_skills=CANDIDATE_SKILLS,
             )
             add_job_extraction_skill_evidence(session, extraction.id, merged)

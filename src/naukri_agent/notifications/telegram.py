@@ -15,7 +15,7 @@ Safety properties, each covered by tests:
     a restart) answers nothing: it is told "no longer active" and the old card's
     buttons are switched off. Without this, a duplicate "Yes" that arrived after
     the next job's card was sent counted as approval of that next job (found
-    2026-10-21: Eduitalent was "approved" 27 seconds after the previous job).
+    2026-10-21: Contoso Talent was "approved" 27 seconds after the previous job).
   * The buttons of a card that has just been answered turn into one grey
     "Applying... please wait" (or "No - skipped") button, so it cannot be tapped twice.
   * With instant_ack the answer is noticed within seconds even while the app is busy

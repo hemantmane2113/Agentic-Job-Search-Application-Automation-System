@@ -122,7 +122,7 @@ def test_which_addresses_count():
 # --- in the research report and the email ---------------------------------------------------------------------------
 
 
-JOB = {"job_id": 1, "title": "AI Engineer (HS_Kitchen)", "company": "LG Soft India", "location": "Bengaluru", "url": JOB_URL}
+JOB = {"job_id": 1, "title": "AI Engineer (HS_Kitchen)", "company": "Example Soft India", "location": "Bengaluru", "url": JOB_URL}
 REPORT = ResearchReport(company_summary="s", careers_url="https://lgsoftindia.com/careers")
 
 

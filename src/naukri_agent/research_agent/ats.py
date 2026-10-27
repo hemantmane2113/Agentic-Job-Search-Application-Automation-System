@@ -48,7 +48,7 @@ _NOTES = {
 }
 
 
-# A careers page that shows next to no text to an automated reader. Seen live on 2026-10-09 (LG Soft India on
+# A careers page that shows next to no text to an automated reader. Seen live on 2026-10-09 (Example Soft India on
 # Darwinbox): the careers home came back as the company name and nothing else, and its job API refuses anything
 # that is not a normal browser, so the job list, and so each job's own address, cannot be read automatically.
 _MIN_VISIBLE_CHARS = 80

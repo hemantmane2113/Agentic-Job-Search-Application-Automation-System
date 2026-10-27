@@ -113,7 +113,7 @@ def _digest_text(tmp_path, link, apply_type="company_site"):
     cfg = settings(tmp_path)
     with session_scope(in_memory_factory()) as s:
         cand, run = make_candidate(s), make_run(s)
-        job = add_job(s, slug="lg", ext="061026504574", title="AI Engineer", company="LG Soft India")
+        job = add_job(s, slug="lg", ext="061026504574", title="AI Engineer", company="Example Soft India")
         job.apply_type, job.apply_redirect_url = apply_type, link
         score(s, cand.id, job.id, overall=90.0)
         select_static_resume(s, job.id, cand.id)

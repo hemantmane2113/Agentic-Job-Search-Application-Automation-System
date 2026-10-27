@@ -334,7 +334,7 @@ def test_any_exception_stops_the_run_and_the_summary_flags_it(tmp_path):
 
 
 def test_an_error_after_the_click_is_not_reported_as_failed_when_naukri_shows_the_job_as_applied(tmp_path):
-    """Live 2026-10-09 (Recrosoft): an answer could not be entered, yet the application had gone through."""
+    """Live 2026-10-09 (Vandelay Soft): an answer could not be entered, yet the application had gone through."""
     c = cfg(tmp_path)
     factory, urls = seed(c, [("e", "040926001451", 95.0, {}), ("g", "040926001452", 90.0, {})])
     fake = FakeClient({urls["e"]: {"raise_on_click": True}, urls["g"]: {}})  # Naukri's page says Applied

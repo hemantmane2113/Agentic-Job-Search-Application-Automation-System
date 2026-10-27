@@ -280,7 +280,7 @@ def test_waiting_survives_the_database_being_locked_when_it_first_tries_to_open_
 
 # --- a careers page that shows no jobs to an automated reader -------------------------------------------------------------
 
-STUB = "<!doctype html><html><head><title>LG Soft India Private Limited</title></head><body>LG Soft India Private Limited - </body></html>"
+STUB = "<!doctype html><html><head><title>Example Soft India Private Limited</title></head><body>Example Soft India Private Limited - </body></html>"
 FULL_PAGE = "<html><body><h1>Careers</h1><p>" + "We are hiring engineers across many teams and locations. " * 5 + "</p></body></html>"
 
 
@@ -305,7 +305,7 @@ def test_the_email_tells_you_what_to_search_for_when_the_jobs_could_not_be_seen(
     from naukri_agent.research_agent.models import ResearchReport
     from naukri_agent.research_agent.runner import format_email_entry
 
-    job = {"title": "AI Engineer (HS_Kitchen)", "company": "LG Soft India", "location": "Bengaluru", "url": "https://naukri.example/j"}
+    job = {"title": "AI Engineer (HS_Kitchen)", "company": "Example Soft India", "location": "Bengaluru", "url": "https://naukri.example/j"}
     report = ResearchReport(company_summary="s", careers_url=CAREERS, apply_method="Darwinbox", apply_note="n", find_by_title=True)
     text = format_email_entry(1, job, report)
     assert 'search for "AI Engineer (HS_Kitchen)" (Bengaluru)' in text and "direct job link could not be read" in text

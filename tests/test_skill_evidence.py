@@ -39,7 +39,7 @@ CANDIDATE_SKILLS = [
 # Real, persisted job.description text (Run 19, jobs 66 and 8) -- copied
 # verbatim so these tests exercise the actual scraped artefacts (e.g.
 # "machinelearning" glued with no separator at all).
-GENERAC_DESCRIPTION = """Primary Purpose
+OSCORP_DESCRIPTION = """Primary Purpose
 
 The Data Scientist Support role provides ongoing operational and analytical support for Agentic AI and Conversational AI solutions, ensuring their stability, accuracy, and effective performance in production environments. This role works under the guidance of senior data scientists, AI engineers, and platform leads to support model behavior, monitor system performance, analyze interaction data, and assist with tuning, testing, and validation activities.
 
@@ -86,7 +86,7 @@ Exposure to data pipelines, feature engineering, or model monitoring concepts.
 Ability to clearly explain analytical results and recommendations to stakeholders.
 Strong desire to learn, grow, and take on increasing responsibility over time."""
 
-ORIGIN_HR_DESCRIPTION = """Master s or Ph.D. degree in Statistics, Mathematics, Computer Science, Data Science, (or equivalent practical experience)
+INITRODE_HR_DESCRIPTION = """Master s or Ph.D. degree in Statistics, Mathematics, Computer Science, Data Science, (or equivalent practical experience)
 
  Strong coding skills in Python or R , with extensive use of scientific computing and data science libraries
 
@@ -215,9 +215,9 @@ def test_hyphenated_form_machine_learning_matches():
     assert len(evidence) == 1
 
 
-def test_real_generac_glued_form_machinelearning_matches():
-    assert "machinelearning" in GENERAC_DESCRIPTION.lower()
-    evidence = recover_vocabulary_skills(GENERAC_DESCRIPTION, ["Machine Learning"])
+def test_real_oscorp_glued_form_machinelearning_matches():
+    assert "machinelearning" in OSCORP_DESCRIPTION.lower()
+    evidence = recover_vocabulary_skills(OSCORP_DESCRIPTION, ["Machine Learning"])
     assert len(evidence) == 1
 
 
@@ -481,7 +481,7 @@ def test_merged_required_preferred_can_populate_job_extraction_create():
     _raw, merged = build_skill_evidence(
         required_skills=["SQL", "Python", "R"],
         preferred_skills=["Agentic AI"],
-        description=GENERAC_DESCRIPTION,
+        description=OSCORP_DESCRIPTION,
         candidate_skills=CANDIDATE_SKILLS,
     )
     required_out, preferred_out = merged_required_preferred(merged)
@@ -501,10 +501,10 @@ def test_merged_required_preferred_excludes_unclassified():
     assert "Databricks" not in required_out and "Databricks" not in preferred_out
 
 
-# --- Generac / Origin HR: expected evidence ---------------------------------
+# --- Oscorp / Initrode HR: expected evidence ---------------------------------
 
 
-def test_generac_expected_evidence_includes_all_listed_skills():
+def test_oscorp_expected_evidence_includes_all_listed_skills():
     """Item 9: verify the system can REPRESENT evidence for every one
     of these -- not that every one becomes required/preferred. Content
     must never be silently lost."""
@@ -512,7 +512,7 @@ def test_generac_expected_evidence_includes_all_listed_skills():
         required_skills=["SQL", "Python", "R"],
         preferred_skills=["Agentic AI", "Chatbots", "Operational AI"],
         ld_json_skills=["SQL", "Python", "R", "AWS", "Azure", "Databricks", "Agentic AI"],
-        description=GENERAC_DESCRIPTION,
+        description=OSCORP_DESCRIPTION,
         candidate_skills=CANDIDATE_SKILLS,
     )
     merged_skills = {normalize_skill(m.skill) for m in merged}
@@ -524,11 +524,11 @@ def test_generac_expected_evidence_includes_all_listed_skills():
         assert normalize_skill(skill) in merged_skills, f"{skill} missing from merged evidence"
 
 
-def test_generac_recovers_candidate_known_missed_skills_via_vocabulary():
+def test_oscorp_recovers_candidate_known_missed_skills_via_vocabulary():
     _raw, merged = build_skill_evidence(
         required_skills=["SQL", "Python", "R"],
         preferred_skills=["Agentic AI", "Chatbots", "Operational AI"],
-        description=GENERAC_DESCRIPTION,
+        description=OSCORP_DESCRIPTION,
         candidate_skills=CANDIDATE_SKILLS,
     )
     merged_by_skill = {normalize_skill(m.skill): m for m in merged}
@@ -538,8 +538,8 @@ def test_generac_recovers_candidate_known_missed_skills_via_vocabulary():
         assert merged_by_skill[key].source == "deterministic_vocabulary"
 
 
-def test_generac_naukri_source_exposes_non_candidate_skills_illustrative():
-    """AWS/Azure/Databricks are real Generac requirements the candidate
+def test_oscorp_naukri_source_exposes_non_candidate_skills_illustrative():
+    """AWS/Azure/Databricks are real Oscorp requirements the candidate
     does not know -- only a Naukri-sourced input can expose them
     (deterministic vocabulary structurally cannot). No real ld+json/
     Key-Skills capture exists for this specific job (live browser
@@ -548,7 +548,7 @@ def test_generac_naukri_source_exposes_non_candidate_skills_illustrative():
     _raw, merged = build_skill_evidence(
         required_skills=["SQL", "Python", "R"],
         ld_json_skills=["SQL", "Python", "R", "AWS", "Azure", "Databricks"],
-        description=GENERAC_DESCRIPTION,
+        description=OSCORP_DESCRIPTION,
         candidate_skills=CANDIDATE_SKILLS,
     )
     merged_by_skill = {normalize_skill(m.skill): m for m in merged}
@@ -558,7 +558,7 @@ def test_generac_naukri_source_exposes_non_candidate_skills_illustrative():
         assert merged_by_skill[key].classification == "unclassified"
 
 
-def test_origin_hr_expected_evidence():
+def test_initrode_hr_expected_evidence():
     """All 8 requested skills must classify correctly. The WINNING
     source varies by design: when deterministic vocabulary independently
     finds an explicit marker for a skill (e.g. "Proficiency in SQL",
@@ -573,7 +573,7 @@ def test_origin_hr_expected_evidence():
             "Python", "R", "SQL", "Machine Learning", "Deep Learning", "NLP", "Generative AI",
         ],
         preferred_skills=["MLOps"],
-        description=ORIGIN_HR_DESCRIPTION,
+        description=INITRODE_HR_DESCRIPTION,
         candidate_skills=CANDIDATE_SKILLS,
     )
     merged_by_skill = {normalize_skill(m.skill): m for m in merged}
@@ -589,14 +589,14 @@ def test_origin_hr_expected_evidence():
     assert merged_by_skill[mlops_key].classification_conflict is False  # nothing else had an opinion
 
 
-def test_origin_hr_statistical_terms_remain_unrepresented():
+def test_initrode_hr_statistical_terms_remain_unrepresented():
     """Investigation finding, reconfirmed: statistical inference /
     hypothesis testing / probability are NOT in the candidate's own
     vocabulary, so deterministic_vocabulary structurally cannot
     recover them either -- they remain entirely unrepresented."""
     _raw, merged = build_skill_evidence(
         required_skills=["Python", "R", "SQL"],
-        description=ORIGIN_HR_DESCRIPTION,
+        description=INITRODE_HR_DESCRIPTION,
         candidate_skills=CANDIDATE_SKILLS,
     )
     merged_skills = {normalize_skill(m.skill) for m in merged}
@@ -604,7 +604,7 @@ def test_origin_hr_statistical_terms_remain_unrepresented():
         assert normalize_skill(missed) not in merged_skills
 
 
-def test_origin_hr_mlops_sentence_alone_is_unclassified_by_markers():
+def test_initrode_hr_mlops_sentence_alone_is_unclassified_by_markers():
     sentence = (
         "Track record of deploying models into production environments "
         "and tracking them via MLOps pipelines."

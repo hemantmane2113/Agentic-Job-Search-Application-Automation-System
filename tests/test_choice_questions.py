@@ -36,7 +36,7 @@ REAL_BODY = {
                     "questionnaireId": 12918289,
                 }
             ],
-            "companyName": "LatentView Analytics",
+            "companyName": "Soylent Analytics",
             "jobTitle": "Data Scientist",
         }
     ],
@@ -521,7 +521,7 @@ def test_the_cli_passes_max_jobs_through(monkeypatch):
     assert CliRunner().invoke(cli_main.cli, ["telegram-apply", "--max-jobs", "0"]).exit_code != 0  # must be >= 1
 
 
-# --- checkbox questions and a question Naukri skipped (live 2026-10-10, Indium Software) ----------------------------------------
+# --- checkbox questions and a question Naukri skipped (live 2026-10-10, Globex Software) ----------------------------------------
 
 
 def _two_question_body():

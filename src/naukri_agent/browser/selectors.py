@@ -150,11 +150,11 @@ APPLY_DRAWER = ".chatbot_Drawer"
 # are answered the same way: click the label, then the drawer's Save.
 APPLY_CHOICE_LABEL = "label.ssrc__label, label.mcc__label"
 APPLY_DRAWER_SAVE = ".chatbot_Drawer .sendMsg"
-# VERIFIED 2026-10-10 (the saved drawer of the Indium attempt): every message the bot sends inside the drawer is an
+# VERIFIED 2026-10-10 (the saved drawer of the Globex attempt): every message the bot sends inside the drawer is an
 # `li.botItem` (the user's answers are `li.userItem`). When the number of bot messages grows after an answer is saved, the
 # NEXT question has arrived; when the drawer disappears, Naukri has finished (or closed) the form.
 APPLY_BOT_ITEM = ".chatbot_Drawer li.botItem"
-# VERIFIED 2026-10-10 (Straive and Indium Software applications; the saved panel of the Indium attempt shows the answers typed
+# VERIFIED 2026-10-10 (Umbrella Services and Globex Software applications; the saved panel of the Globex attempt shows the answers typed
 # in and the box itself: <div class="textArea" contenteditable="true"> inside .chatbot_Drawer). A free-text or number answer is
 # typed there, then the drawer's Save is pressed. Before that the older guess APPLY_ANSWER_INPUT below was tried and timed out on
 # 2026-10-09, so it is only a fallback now. When neither box is found the panel's screenshot and HTML are saved

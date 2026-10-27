@@ -189,7 +189,7 @@ def _settled_among(session: Session, urls: list[str]) -> set[str]:
     Which of these search-card addresses are jobs we have ALREADY read and have nothing more to learn from: the job is
     in the database (matched the way upsert_job matches: Naukri's job number, else the exact address) AND it either
     has a successful extraction or can never get one (its text is too long to send to the model even once repeated
-    lines are dropped). A job that is in the database but failed to parse, like Jet2 did, is NOT settled, so it is read
+    lines are dropped). A job that is in the database but failed to parse, like Fabrikam did, is NOT settled, so it is read
     again. Read-only; no network.
     """
     from naukri_agent.database.models import Job, JobExtraction

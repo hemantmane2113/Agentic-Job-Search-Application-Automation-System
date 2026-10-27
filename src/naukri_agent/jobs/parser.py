@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 # truncate-and-send: the full JD is never sent to the model.
 MAX_JD_CHARS_FOR_LLM = 8000
 
-# Some postings arrive with their whole text pasted twice (seen 2026-10-11: Jet2's 15,671-char JD was one 7,851-char
+# Some postings arrive with their whole text pasted twice (seen 2026-10-11: Fabrikam's 15,671-char JD was one 7,851-char
 # posting followed by an identical copy). Before giving up on a JD that is too long, repeated lines are dropped,
 # keeping the first copy of each. Only whole lines of at least this many characters count as repeats, so short
 # structural lines ("Skills", "o  Python") are never touched, and nothing is rewritten or summarised: what is left is
@@ -186,12 +186,12 @@ def _normalize_job_type_in_payload(data: object) -> list[str]:
 # free-text JD body, which sometimes carries its own statement (e.g.
 # "Exp - 3+", or "Required Skills: ... 5+ years of experience ..."). A
 # small model can blend two DIFFERENT stated numbers into one
-# self-inconsistent range that matches NEITHER source (Talent Corner:
+# self-inconsistent range that matches NEITHER source (Massive Dynamic:
 # structured "4-5" + body "3+" -> LLM returned "3-5").
 #
 # The product requirement is NOT "pick one source and trust it" (that
 # silently discards whichever side didn't win, in either direction —
-# proven live on both Talent Corner [unfavourable] and Praxis Global
+# proven live on both Massive Dynamic [unfavourable] and Tyrell Global
 # Alliance [favourable, masked by coincidence]). It is: build a bounded,
 # deterministic candidate list (structured value + every JD-body
 # statement that reads as a genuine REQUIREMENT, not a preferred/soft

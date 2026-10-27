@@ -101,7 +101,7 @@ def score_skills(
     # _coverage([]) == 1.0 is correct in isolation ("nothing to fail
     # against"), but combining that with the 0.8/0.2 split silently
     # rewarded jobs where the model filed everything under "preferred"
-    # instead (Run 17: Wabtec 7/17 preferred -> scored as if 88% skills
+    # instead (Run 17: Wonka 7/17 preferred -> scored as if 88% skills
     # coverage). When nothing was classified required, the preferred
     # list -- whatever the model actually extracted -- carries the full
     # weight instead of being capped at (1 - required_skills_weight_ratio).

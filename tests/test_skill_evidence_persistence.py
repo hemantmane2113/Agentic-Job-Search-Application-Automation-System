@@ -5,7 +5,7 @@ evidence, and the two repository functions that write them.
 
 Covers table shape/constraints, versioning/lifecycle rules (raw
 replaced, derived immutable per extraction version), transactional
-integrity, and real-data regression against the Generac/Origin HR
+integrity, and real-data regression against the Oscorp/Initrode HR
 fixtures. No scoring, weights, thresholds, the 60% floor, experience
 logic, cooldown, recommendation limits, application history,
 scheduler, or email behavior is touched anywhere in this file.
@@ -396,9 +396,9 @@ def test_existing_preferred_skills_field_still_a_plain_json_list():
         assert extraction.preferred_skills == ["Docker", "Kubernetes"]
 
 
-# --- I: real-data regression (Generac / Origin HR) ----------------------
+# --- I: real-data regression (Oscorp / Initrode HR) ----------------------
 
-GENERAC_DESCRIPTION = """Primary Purpose
+OSCORP_DESCRIPTION = """Primary Purpose
 
 The Data Scientist Support role provides ongoing operational and analytical support for Agentic AI and Conversational AI solutions, ensuring their stability, accuracy, and effective performance in production environments.
 
@@ -425,7 +425,7 @@ CANDIDATE_SKILLS = [
     "BeautifulSoup", "Selenium", "Scrapy",
 ]
 
-ORIGIN_HR_DESCRIPTION = """Master s or Ph.D. degree in Statistics, Mathematics, Computer Science, Data Science.
+INITRODE_HR_DESCRIPTION = """Master s or Ph.D. degree in Statistics, Mathematics, Computer Science, Data Science.
 
 Strong coding skills in Python or R, with extensive use of scientific computing libraries.
 
@@ -436,15 +436,15 @@ Experience with deep learning frameworks or NLP / Generative AI techniques.
 Track record of deploying models into production environments and tracking them via MLOps pipelines."""
 
 
-def test_generac_persists_evidence_for_all_expected_skills():
+def test_oscorp_persists_evidence_for_all_expected_skills():
     from naukri_agent.matching.skill_normalizer import normalize_skill
 
     session_factory = init_db(_in_memory_settings())
     with session_scope(session_factory) as session:
         job, _ = upsert_job(session, _job(
-            title="Data Scientist", company="Generac Captiva",
-            description=GENERAC_DESCRIPTION,
-            url="https://www.naukri.com/job-listings-data-scientist-generac-captiva-900003",
+            title="Data Scientist", company="Oscorp Captiva",
+            description=OSCORP_DESCRIPTION,
+            url="https://www.naukri.com/job-listings-data-scientist-oscorp-captiva-900003",
         ))
         replace_raw_skill_evidence(
             session, job.id,
@@ -464,7 +464,7 @@ def test_generac_persists_evidence_for_all_expected_skills():
             required_skills=["SQL", "Python", "R"],
             preferred_skills=["Agentic AI", "Chatbots", "Operational AI"],
             ld_json_skills=ld_json_skills,
-            description=GENERAC_DESCRIPTION,
+            description=OSCORP_DESCRIPTION,
             candidate_skills=CANDIDATE_SKILLS,
         )
         add_job_extraction_skill_evidence(session, extraction.id, merged)
@@ -481,12 +481,12 @@ def test_generac_persists_evidence_for_all_expected_skills():
             assert normalize_skill(skill) in persisted_keys, f"{skill} not persisted"
 
 
-def test_origin_hr_persists_merged_evidence_and_conflict_information():
+def test_initrode_hr_persists_merged_evidence_and_conflict_information():
     session_factory = init_db(_in_memory_settings())
     with session_scope(session_factory) as session:
         job, _ = upsert_job(session, _job(
-            title="Data Scientist", company="Origin Hr",
-            description=ORIGIN_HR_DESCRIPTION,
+            title="Data Scientist", company="Initrode Hr",
+            description=INITRODE_HR_DESCRIPTION,
             url="https://www.naukri.com/job-listings-data-scientist-origin-hr-900004",
         ))
         extraction = add_job_extraction(
@@ -499,7 +499,7 @@ def test_origin_hr_persists_merged_evidence_and_conflict_information():
         _raw, merged = build_skill_evidence(
             required_skills=["Python", "R", "SQL", "Deep Learning", "NLP", "Generative AI"],
             preferred_skills=["MLOps"],
-            description=ORIGIN_HR_DESCRIPTION,
+            description=INITRODE_HR_DESCRIPTION,
             candidate_skills=CANDIDATE_SKILLS,
         )
         add_job_extraction_skill_evidence(session, extraction.id, merged)

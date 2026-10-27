@@ -129,7 +129,7 @@ def test_stale_repost_link_is_repaired_when_a_later_fetch_proves_distinct_conten
 
     with session_scope(sf) as s:  # run 6: distinct real content
         upsert_job(s, _job(url=_URL_A, title="Gen AI Data Scientist",
-                           company="Sigma Allied Services", description="Build LLM/RAG systems."))
+                           company="Stark Allied Services", description="Build LLM/RAG systems."))
         upsert_job(s, _job(url=_URL_B, title="Senior Data Scientist",
                            company="NiCE", description="Own the fraud-detection models."))
 

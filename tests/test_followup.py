@@ -542,7 +542,7 @@ def test_one_command_that_blows_up_does_not_end_phone_control(tmp_path):
 
 
 def test_a_naukri_apply_job_you_applied_to_by_hand_is_labelled_applied_directly():
-    """Live 2026-10-10: Straive and Dash Ast were applied to by hand on Naukri; they are not company-website applications."""
+    """Live 2026-10-10: Umbrella Services and Hooli Systems were applied to by hand on Naukri; they are not company-website applications."""
     with session_scope(in_memory_factory()) as s:
         a, b, *_ = seed(s, 3)
         s.get(Job, a).apply_type = "native"

@@ -236,7 +236,7 @@ def test_question_dot_accepts_the_suggestion_and_own_text_overrides_it():
 
 
 def test_question_without_a_suggestion_says_so_and_a_lone_dot_is_not_sent_as_the_answer():
-    """Live 2026-10-10 (Dash Ast): a '.' with no suggestion to accept was stored as the answer, 'Are you currently
+    """Live 2026-10-10 (Hooli Systems): a '.' with no suggestion to accept was stored as the answer, 'Are you currently
     residing in Bengaluru? A: .' It must ask again instead."""
     w = World([[], [text(".")], [], [text("Yes")]])
     assert interaction(w).ask_question(1, 1, "Are you residing in Bengaluru?", None) == "Yes"

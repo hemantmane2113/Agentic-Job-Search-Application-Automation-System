@@ -66,7 +66,7 @@ def test_B_talent_corner_conflict_review_with_message():
     assert msg.endswith("Review manually.")
 
 
-def test_C_praxis_conflict_review_exact_product_wording():
+def test_C_tyrell_conflict_review_exact_product_wording():
     """structured 2-4, JD 'Experience Level: 2-4+ Years' (agrees) +
     'Required Skills ... 5+ years' (excludes) -> conflict, REVIEW,
     message matches the product's own literal template word for word."""
@@ -200,7 +200,7 @@ def test_existing_grace_window_is_unchanged_just_beyond_grace_excludes():
 
 
 def test_heading_fused_with_first_bullet_still_toggles_section_state():
-    """Real-world scraping artefact (Praxis): a heading and its first
+    """Real-world scraping artefact (Tyrell): a heading and its first
     bullet land on ONE line. The following line must still be treated
     as inside the Required section."""
     job = _job(
@@ -219,7 +219,7 @@ def test_long_prose_sentence_with_an_early_hyphen_is_never_a_labeled_statement()
     even if it also happens to contain a number+unit somewhere."""
     job = _job(
         None,
-        "Praxis Global Alliance is an Asia-based next-generation "
+        "Tyrell Global Alliance is an Asia-based next-generation "
         "management consulting firm serving clients across 40+ countries "
         "with 5 years of proven delivery excellence.",
     )

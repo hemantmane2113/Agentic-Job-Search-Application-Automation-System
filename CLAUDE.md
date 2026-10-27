@@ -60,7 +60,7 @@ scripts/                         register_phone_guard.ps1 (the 10-minute guard t
   agents/  scheduler/  legacy/   profile answers (no AI); optional in-process scheduler; older commands kept but unused
   cli/                           `naukri-agent <command>`
 tests/                           94+ files; tests/manual/ needs a real Naukri account; tests/browser_fakes.py fakes Playwright
-docs/                            PROJECT_OVERVIEW.md and architecture.html (the system map)
+docs/                            PROJECT_OVERVIEW.md, SETUP.md, OPERATIONS.md, TROUBLESHOOTING.md and architecture.html (the system map)
 workflow-diagrams/               the daily-run, apply-flow, phone-reachability and weekly-report pages (one HTML file each) and a README
 ```
 
@@ -82,7 +82,7 @@ message (10:50) by `phone-guard`.
 - **Telegram's connection drops now and then.** Waiting for a tap must survive a dropped connection (`TelegramChannel._wait`).
 - **Every Telegram button belongs to ONE prompt** (`callback_data` carries a prompt id: `y:<id>`, `opt:<id>:<n>`). A tap on any
   other card answers nothing. Never go back to bare `y` / `n` / `opt:N`: a second tap on the previous job's card (people tap
-  again when the app takes seconds to react) was read as approval of the NEXT job (2026-10-21: Eduitalent "approved" 27 s
+  again when the app takes seconds to react) was read as approval of the NEXT job (2026-10-21: Contoso Talent "approved" 27 s
   after the previous job). An answered card's buttons turn into one grey button: "Applying... please wait" or "No - skipped".
 - **A tap is acknowledged within seconds, while the browser is busy** (`telegram_instant_ack`, default on): a small background
   reader (`TelegramChannel._watch_loop`) watches the ONE card just sent. Telegram allows one `getUpdates` reader at a time, so
@@ -104,7 +104,7 @@ message (10:50) by `phone-guard`.
   = something is wrong with the PC or its internet. The Phone Control task has "run only if a network is available" switched
   OFF (a Wi-Fi blip used to end it). The guard only sends, never reads, Telegram.
 - **Naukri's question form must not sit open while the person answers on Telegram, and answers must go in at Naukri's pace.**
-  Found 22-26 Oct (Tiger Analytics failed three ways): after 2 min 28 s open, four answers typed in ONE second gave Naukri's own
+  Found 22-26 Oct (Acme Analytics failed three ways): after 2 min 28 s open, four answers typed in ONE second gave Naukri's own
   "error while processing your job application"; after 4 min 40 s the form had closed. So: (1) `submit_answer` waits after each
   Save until the bot adds its next `li.botItem` (VERIFIED selector) or the form closes, and returns `next|closed|timeout|skipped`;
   a `closed` form means Naukri finished early, so the runner stops answering and checks "Applied" (no more spurious errors);
@@ -114,7 +114,7 @@ message (10:50) by `phone-guard`.
   the reopen path (a job's Apply clicked a second time) has only run against fakes; the first real use will show. Do not test it by
   pressing Apply on the account.
 - **Answer what the form ASKS, not what Naukri's data LISTS** (`apply_follow_live_form`, default on; `_follow_live_form` in
-  `auto_apply_runner.py`). Found 23-26 Oct: Naukri's data listed 7 questions for Tiger Analytics but its form asked ONE
+  `auto_apply_runner.py`). Found 23-26 Oct: Naukri's data listed 7 questions for Acme Analytics but its form asked ONE
   ("... experience in Deployment?"): it keeps the answers it already has (after a failed try it asks only what is left) and fills
   notice period and pay from the profile. Typing the whole list put answers into questions never asked (the saved panel of 10 Oct
   shows the bot replying "Sorry! I am not trained to answer this query :("), in a one-second burst that lost one. So the runner
@@ -129,7 +129,7 @@ message (10:50) by `phone-guard`.
   choice-label and text-box selectors are verified from the saved 10 Oct panel); the first real use will tell. Do not test it by
   pressing Apply on the account.
 - **The network guard stays armed for the rest of a browser session** after the first application form is opened, and it also blocks
-  the resume UPLOAD (21 Oct: Eduitalent's resume change failed; the log shows `BLOCKED ... filevalidation.naukri.com/file`). So before
+  the resume UPLOAD (21 Oct: Contoso Talent's resume change failed; the log shows `BLOCKED ... filevalidation.naukri.com/file`). So before
   a resume change in a session that has already opened a form, the runner starts a fresh browser (`session_armed`). A resume change
   that cannot be confirmed saves `<attempt>_resume.png/.html` and says what Naukri's profile showed.
 - **One Chrome profile, one command at a time.** `BrowserManager.launch` takes `browser/profile_lock.py`'s file lock and waits its
@@ -143,7 +143,7 @@ message (10:50) by `phone-guard`.
 
 Three tiers: unit; mocked-browser (`test_browser_*.py`, no real browser); manual (`pytest -m manual`, excluded by default). Run
 `pytest` before calling a change done. Currently **1773 passed, 3 deselected**. A fix for a live bug gets a test built from the
-real shape that failed (see `tests/test_choice_questions.py` for the Indium panel).
+real shape that failed (see `tests/test_choice_questions.py` for the Globex panel).
 
 ## Working style the user expects
 

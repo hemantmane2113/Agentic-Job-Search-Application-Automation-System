@@ -25,7 +25,7 @@ LD = selectors.JOB_DETAIL_LD_JSON
 def _job_posting(
     *,
     title="Gen AI Data Scientist",
-    company="Sigma Allied Services",
+    company="Stark Allied Services",
     cities=("Pune", "Bengaluru", "Gurugram"),
     months=24,
     salary="11-21 Lacs P.A",
@@ -86,7 +86,7 @@ def test_ld_json_is_primary_source_and_never_clicks_or_fills():
 
     assert detail.url == URL
     assert detail.title == "Gen AI Data Scientist"
-    assert detail.company == "Sigma Allied Services"
+    assert detail.company == "Stark Allied Services"
     assert detail.location == "Pune, Bengaluru, Gurugram"
     assert detail.salary_text == "11-21 Lacs P.A"
     assert detail.experience_text == "2+ years"  # from monthsOfExperience: 24
@@ -105,7 +105,7 @@ def test_ld_json_graph_and_array_shapes_resolve():
         page = _page_with_ld(_job_posting(wrap=wrap))
         detail = jobs_module.fetch_job_detail(page, URL)
         assert detail.title == "Gen AI Data Scientist", wrap
-        assert detail.company == "Sigma Allied Services", wrap
+        assert detail.company == "Stark Allied Services", wrap
 
 
 def test_experience_prefers_visible_range_over_ld_json_months():
@@ -152,7 +152,7 @@ def test_partial_ld_json_merges_with_css_per_field():
     )
     detail = jobs_module.fetch_job_detail(page, URL)
     assert detail.title == "Gen AI Data Scientist"       # ld+json
-    assert detail.company == "Sigma Allied Services"     # ld+json
+    assert detail.company == "Stark Allied Services"     # ld+json
     assert detail.salary_text == "18-25 Lacs P.A."       # css fallback
     assert detail.experience_text == "5 - 9 years"       # css fallback
 
@@ -346,7 +346,7 @@ def test_months_of_experience_non_numeric_string_degrades_to_none():
 
 def test_different_job_pages_produce_different_fingerprints():
     page_a = _page_with_ld(
-        _job_posting(title="Gen AI Data Scientist", company="Sigma Allied Services",
+        _job_posting(title="Gen AI Data Scientist", company="Stark Allied Services",
                      description="<p>Build LLM/RAG systems.</p>")
     )
     page_b = _page_with_ld(
@@ -354,7 +354,7 @@ def test_different_job_pages_produce_different_fingerprints():
                      description="<p>Own the fraud-detection models.</p>")
     )
     page_c = _page_with_ld(  # identical content to A
-        _job_posting(title="Gen AI Data Scientist", company="Sigma Allied Services",
+        _job_posting(title="Gen AI Data Scientist", company="Stark Allied Services",
                      description="<p>Build LLM/RAG systems.</p>")
     )
 

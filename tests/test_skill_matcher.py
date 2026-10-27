@@ -109,14 +109,14 @@ def test_no_skill_years_data_gives_plain_factor_not_invented():
 #
 # Before the fix: required=[] -> req_ratio=1.0 -> combined = 0.8*1.0 +
 # 0.2*pref_ratio, so a job could score ~88% skills coverage while only
-# 7 of 17 (41%) of its actually-listed skills matched (Wabtec, Run 17).
+# 7 of 17 (41%) of its actually-listed skills matched (Wonka, Run 17).
 # After the fix: required=[] and preferred non-empty -> combined_ratio
 # IS pref_ratio -- the preferred list carries the full weight instead
 # of being capped at 20%.
 
 
-def test_wabtec_style_required_empty_preferred_7_of_17_gives_plain_coverage():
-    """Reproduces Run 17 job 62 (Wabtec) exactly: required=[], 17
+def test_wonka_style_required_empty_preferred_7_of_17_gives_plain_coverage():
+    """Reproduces Run 17 job 62 (Wonka) exactly: required=[], 17
     preferred skills, 7 matched. Before the fix this scored 30.88/35
     (as if ~88% coverage); after the fix it must equal 35 * 7/17."""
     settings = _settings()
@@ -169,7 +169,7 @@ def test_spectrum_style_required_empty_preferred_6_of_29_gives_plain_coverage():
 
 def test_required_and_preferred_both_populated_formula_is_unchanged():
     """The 0.8/0.2 weighted formula must be byte-identical to before
-    whenever required_skills is non-empty (Run 17 job 20, Wissda:
+    whenever required_skills is non-empty (Run 17 job 20, Pied Piper:
     required 6/7 matched, preferred 0/4 matched -> 35*0.6857.. = 24.0)."""
     settings = _settings()
     required = ["Python", "SQL", "Machine Learning", "Statistical Modeling",
@@ -285,7 +285,7 @@ def test_I_required_empty_preferred_6_of_29_returns_none_no_gate():
 
 
 def test_J_required_empty_preferred_7_of_17_returns_none_no_gate():
-    """Reproduces the Wabtec-style case: same -- required=[] means no
+    """Reproduces the Wonka-style case: same -- required=[] means no
     gate, independent of the preferred ratio."""
     preferred = [f"skill{i}" for i in range(17)]
     matched = [f"skill{i}" for i in range(7)]

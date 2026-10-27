@@ -3,11 +3,11 @@ The employer's own address for a company-site job, read from the data Naukri's j
 
 The "Apply on company site" button has no link behind it, but Naukri's own page receives the address it will open
 in the job's JSON (GET /jobapi/v4/job/<id>, field jobDetails.applyRedirectUrl). Checked on 2026-10-09 against four
-real company-site jobs: it held the same address a person lands on after pressing the button (LG Soft on
-Darwinbox, Syngenta on SmartRecruiters, ...).
+real company-site jobs: it held the same address a person lands on after pressing the button (Example Soft on
+Darwinbox, Northwind on SmartRecruiters, ...).
 
 Pressing the button is NOT an option: Naukri registers the press as an application, so the job shows "Applied" on
-the account afterwards (seen on 2026-10-09, Syngenta, before and after). So this only LOOKS:
+the account afterwards (seen on 2026-10-09, Northwind, before and after). So this only LOOKS:
   * it opens the job page like any read, and watches the page's own GET responses;
   * it presses, types and submits nothing, and sends no request of its own;
   * it keeps only an address that points outside naukri.com.

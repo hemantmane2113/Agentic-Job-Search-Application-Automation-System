@@ -1,6 +1,6 @@
 """Answer what Naukri's form really asks, one question at a time.
 
-Found 23-26 Oct (Tiger Analytics): Naukri's data listed 7 questions, but its form asked ONE ("How many years of experience do
+Found 23-26 Oct (Acme Analytics): Naukri's data listed 7 questions, but its form asked ONE ("How many years of experience do
 you have in Deployment?") - it keeps the answers it already has and asks only what is left, and it fills notice period and pay
 from the profile. The app asked all 7 on Telegram and typed answers into questions the form never asked, in a burst; one answer
 was lost, the bot said "Sorry! I am not trained to answer this query :(" (saved panel, 10 Oct), and the application failed."""

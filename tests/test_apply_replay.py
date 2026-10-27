@@ -1,6 +1,6 @@
 """Slow answers must not break the application, a second resume must not be blocked, and a failure must leave evidence.
 
-Found in the 22-26 Oct runs (Tiger Analytics failed three times, each differently):
+Found in the 22-26 Oct runs (Acme Analytics failed three times, each differently):
   * 23 Oct: the form had been open 2 min 28 s while the person answered on Telegram; then four answers were typed in ONE
     second and Naukri showed "There was an error while processing your job application".
   * 26 Oct: the form had been open 4 min 40 s and had closed ("no text box for this question was found").

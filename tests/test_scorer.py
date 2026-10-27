@@ -299,7 +299,7 @@ def test_talent_corner_reproduction_through_score_job_is_review():
     assert any("4-5" in f and "3+" in f for f in result.negative_factors)
 
 
-def test_praxis_reproduction_through_score_job_is_review():
+def test_tyrell_reproduction_through_score_job_is_review():
     settings = _settings()
     job = _job(
         experience_text="2 - 4 years",
@@ -522,7 +522,7 @@ def test_I_required_empty_preferred_6_of_29_no_skill_gate_at_scorer_level():
 
 
 def test_J_required_empty_preferred_7_of_17_no_skill_gate_at_scorer_level():
-    """Reproduces the Wabtec-style shape: same -- required=[] means no
+    """Reproduces the Wonka-style shape: same -- required=[] means no
     gate message, independent of the preferred ratio."""
     settings = _settings()
     preferred = [f"skill{i}" for i in range(17)]
@@ -549,7 +549,7 @@ def test_K_large_preferred_list_does_not_affect_the_gate_end_to_end():
 
 def test_L_experience_conflict_and_skill_gate_together_review_no_duplicate_messages():
     """Both deterministic overrides fire independently on the same job:
-    an experience conflict (Talent Corner style: structured 4-5 vs JD
+    an experience conflict (Massive Dynamic style: structured 4-5 vs JD
     'Exp - 3+') AND a required-skill gate (2/5 = 40%). Final decision
     must be REVIEW (both mechanisms agree), both distinct messages must
     be present, and neither message may be duplicated."""

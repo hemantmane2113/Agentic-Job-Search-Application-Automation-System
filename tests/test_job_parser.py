@@ -1148,7 +1148,7 @@ def test_L_cleanup_does_no_substring_or_fuzzy_matching():
 # build_user_prompt hands the model BOTH Naukri's structured
 # experience_text field and the free-text JD body, which can carry its
 # own conflicting experience statement. A small model can blend the two
-# into a self-inconsistent range (Talent Corner, Run 17: structured
+# into a self-inconsistent range (Massive Dynamic, Run 17: structured
 # "4 - 5 years" + JD body "Exp - 3+" -> LLM returned min=3, max=5,
 # matching NEITHER source). The structured field is authoritative
 # whenever it parses as a clear "N - M years" range or "N+ years"

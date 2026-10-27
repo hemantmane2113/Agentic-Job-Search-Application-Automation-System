@@ -93,7 +93,7 @@ def test_a_known_job_that_never_parsed_is_read_again_like_an_unseen_one(tmp_path
     def seed(s):
         _store(s, 1, parsed=True)
         _store(s, 2, parsed=True)
-        _store(s, 3, parsed=False)  # in the database, but its parse failed (the Jet2 case)
+        _store(s, 3, parsed=False)  # in the database, but its parse failed (the Fabrikam case)
 
     _run(client, cfg, seed=seed)
     assert _url(3) in client.fetched and _url(4) in client.fetched

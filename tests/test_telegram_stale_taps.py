@@ -1,7 +1,7 @@
 """A button belongs to ONE prompt. A second tap on a card that was already answered (the app takes a few seconds to react,
 so people tap again), or a tap on an older job's card, must never answer the next prompt.
 
-Found 2026-10-21: Eduitalent was "approved" 27 seconds after the previous job finished, and AXA 14 seconds after
+Found 2026-10-21: Contoso Talent was "approved" 27 seconds after the previous job finished, and Northwind Group 14 seconds after
 Assertive - too fast for anyone to read a card. The buttons carried only "y" / "n", so a late duplicate Yes that
 arrived after the next card was sent counted as approval of that next job."""
 

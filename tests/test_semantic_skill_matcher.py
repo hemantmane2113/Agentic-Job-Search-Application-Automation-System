@@ -351,7 +351,7 @@ def test_compound_or_match_with_a_genuine_branch_is_honored():
 
 
 def test_run22_regression_machine_learning_ai_no_longer_produces_a_false_gap():
-    """Job 94 (Celebal Technologies), Run 22's actual persisted
+    """Job 94 (Cyberdyne Technologies), Run 22's actual persisted
     extraction, actually recommended to the user: required_skills
     included the literal string 'Machine Learning/AI'; the candidate's
     real profile lists 'Machine Learning'. The real digest showed

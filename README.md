@@ -1,470 +1,143 @@
 # naukri-agent
 
-An agentic job-search assistant for Naukri.com. Discovers jobs, scores
-them against your profile with a transparent deterministic algorithm,
-selects the best-fitting resume from your own files, and emails you a
-ranked daily digest of the strongest matches with their Naukri links
-and concise reasons. It never submits an application, and never
-attempts to bypass CAPTCHA, MFA, or anti-bot protections (Section 20).
+[![Tests](https://github.com/hemantmane2113/Agentic-Job-Search-Application-Automation-System/actions/workflows/tests.yml/badge.svg)](https://github.com/hemantmane2113/Agentic-Job-Search-Application-Automation-System/actions/workflows/tests.yml)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Platform: Windows first](https://img.shields.io/badge/platform-Windows%20first-lightgrey)
+
+**A personal job-search assistant for [Naukri.com](https://www.naukri.com). Every day it finds fresh jobs, reads them, scores
+them with plain code against your profile, emails you a digest, and tells your phone about the jobs it can apply to for you.
+It applies only after you tap Yes on Telegram, one job at a time.**
+
+> The AI reads. Plain code decides. A human approves every application.
+
+## What it does
+
+- **Finds and reads jobs.** It searches Naukri every morning, opens about 50 fresh jobs, and has a local AI model extract the
+  skills, experience and salary from each posting (extraction only).
+- **Scores them with arithmetic, not AI.** Seven categories add up to 100: skills 35, experience 20, role 15, salary 11,
+  location 7, education 5, posted recently 7. A score of 80 or more is ACCEPT.
+- **Sends you a daily digest** by email: the best jobs (at most 10) with the reasons for each score, the direct apply link for
+  jobs that apply on the employer's own site, and where earlier jobs stand.
+- **Applies for you, with your permission.** For jobs that use Naukri's own Apply button, your phone receives a card per job.
+  Nothing is applied without your Yes tap on that job. Silence, No or a timeout means no.
+- **Answers the application questions with you.** It asks you only what Naukri's form asks, one question at a time, on
+  Telegram.
+- **Researches company-site jobs.** A read-only AI agent finds the company's careers page and how applying works there.
+- **Keeps a complete record.** Every application, question and answer is stored in a local database; a weekly Excel report
+  is emailed every Sunday.
+- **Stays reachable while you are away.** A phone listener, a 10-minute guard and a once-a-day "the PC is on" message keep
+  `/apply` working from anywhere.
 
 ## See how it works
 
-Interactive diagrams of the whole app. GitHub shows an `.html` file as code, so open them with these links (they run as normal web pages):
+The interactive diagrams open as normal web pages through the links below. (GitHub shows an `.html` file as code, so use the
+links or the pictures.)
 
 | | |
 |---|---|
 | [![System map](workflow-diagrams/previews/architecture.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/docs/architecture.html)<br>**[System map](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/docs/architecture.html)**<br>The parts, a day hour by hour, safety rails, what is stored | [![The daily run](workflow-diagrams/previews/daily-run.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-daily-run.html)<br>**[The daily run](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-daily-run.html)**<br>Finding, reading, scoring and telling you |
 | [![How an application happens](workflow-diagrams/previews/apply-flow.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-apply-flow.html)<br>**[How an application happens](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-apply-flow.html)**<br>Your Yes tap, the right resume, the form's questions | [![Keeping your phone reachable](workflow-diagrams/previews/phone-reachability.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-phone-reachability.html)<br>**[Keeping your phone reachable](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-phone-reachability.html)**<br>Listener, guard, Daily check, reminders |
-| [![The Sunday weekly report](workflow-diagrams/previews/weekly-report.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-weekly-report.html)<br>**[The Sunday weekly report](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-weekly-report.html)**<br>The weekly Excel report |  |
+| [![The Sunday weekly report](workflow-diagrams/previews/weekly-report.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-weekly-report.html)<br>**[The Sunday weekly report](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-weekly-report.html)**<br>The weekly Excel report | |
 
-All five in one place: **https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/**
+## A day in its life
 
-> **Objective change (2026-09-09):** automatic application submission
-> was dropped. The goal is now a **daily match digest** — discover,
-> understand, rank, and email the best jobs; you apply on Naukri
-> yourself and record it with `naukri-agent mark-applied`. This is
-> built as **Stage A** (implemented). The Apply-workflow
-> reverse-engineering (Stage 1.5) is frozen in the tree, untouched.
-
-> **Status:** Stage A (daily match digest) and Stage B (real SMTP
-> email + in-process scheduler) are both implemented — read-only
-> discovery, deterministic ranking, application/cooldown-aware
-> filtering, manual application history, file/console/SMTP digest
-> delivery, 3-sheet Excel mirror, and `naukri-agent scheduler` for
-> daily automation without relying on an OS-level cron entry. `EMAIL_
-> SENDER` still defaults to `file` — switching to `smtp` is a
-> deliberate opt-in step (see "Email setup" below).
-
-## Architecture
-
-```
-naukri_agent/
-├── config.py            # Central validated settings (env vars + .env)
-├── logging_config.py    # Rotating file + console logging
-├── llm/                 # Provider-agnostic LLM abstraction (Phase 5)
-│   ├── base.py              LLMProvider interface
-│   ├── factory.py           reads LLM_PROVIDER/LLM_MODEL, builds the right one
-│   └── providers/            OpenAIProvider, GroqProvider, OllamaProvider
-├── candidate/            # CandidateProfile model (Phase 2)
-├── resume/                # MasterResume (Phase 2); ResumeRegistry + selection (Phase 6)
-├── jobs/                  # JobDiscovery, JobParser (Phase 3, 5)
-├── matching/               # Deterministic scoring engine (Phase 4)
-├── agents/                  # (empty placeholder — unused)
-├── browser/                  # Playwright + Naukri client (Stage 1 read-only; Stage 1.5 frozen)
-├── database/                  # SQLAlchemy models + session management
-├── recommendations/            # build_digest: rank/filter JobMatch rows for the daily email
-├── reporting/                    # excel.py: 3-sheet workbook regenerated from the DB
-├── notifications/                  # FileEmailSender/ConsoleEmailSender/SmtpEmailSender
-├── orchestration/                    # discovery.py + pipeline.py: run_daily_recommendations
-├── scheduler/                          # Stage B: naukri-agent scheduler (daemon.py)
-└── cli/                                  # `naukri-agent <command>` entrypoint
-```
-
-### Browser automation (Phase 7 / Stage A / Stage 1.5)
-
-```
-browser/
-├── browser_manager.py   # owns the Playwright lifecycle exclusively
-├── selectors.py          # the ONLY file with raw CSS selectors — several VERIFIED
-│                           against real captures, several still UNVERIFIED
-│                           placeholders; see the file's own docstring for which
-├── login.py                # fills credentials, detects CAPTCHA/MFA, never solves them
-├── profile.py                # read-only resume-section inspection (Stage 1)
-├── jobs.py                     # search_jobs() + fetch_job_detail(), both read-only (Stage A)
-├── naukri_client.py              # high-level facade — the only interface other code should use
-├── inspection.py                   # the Stage 1 tool: `naukri-agent inspect`
-└── apply_inspection.py               # Stage 1.5, FROZEN: `naukri-agent inspect-apply` —
-                                         human-driven, read-only post-Apply UI inspection;
-                                         never wired into the daily pipeline
-```
-
-Orchestration code should only ever call `NaukriClient`'s methods
-(`login()`, `get_profile_resume()`, `search_jobs()`, `fetch_job_detail()`,
-`get_job()`, `extract_application_ui()`) — never a selector directly.
-`prepare_application()` still raises `NotImplementedError` — application
-submission is out of scope (see the "Objective change" note above).
-
-### The LLM is used only where language understanding is genuinely useful
-
-Job description parsing, skill extraction, resume tailoring, and
-interpreting free-text application questions go through the LLM
-abstraction. Salary matching, experience thresholds, the overall
-match score, duplicate detection, and the final accept/reject/review
-decision are **deterministic Python** — the LLM never decides whether
-an application gets submitted.
-
-### Provider vs. model
-
-`LLM_PROVIDER` (who serves the model: `ollama` / `groq` / `openai`)
-and `LLM_MODEL` (which model to ask for: e.g. `llama3.1`,
-`llama-3.1-70b-versatile`, `gpt-4o-mini`) are configured
-independently. Agents depend only on the `LLMProvider` interface —
-never on a specific provider's SDK.
-
-## Installation
-
-Requires **Python 3.12+**.
-
-```bash
-git clone <repo-url>
-cd Agentic-Job-Search-Application-Automation-System
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-```
-
-Playwright browsers are installed in Phase 7 — not needed yet.
-
-## Environment variables
-
-```bash
-cp .env.example .env
-```
-
-Then edit `.env`. See `.env.example` for the full list with comments.
-At minimum for Phase 1: `DATABASE_URL`, `LOG_DIR`, `LOG_LEVEL`.
-
-## Naukri setup
-
-Copy `NAUKRI_EMAIL` / `NAUKRI_PASSWORD` into `.env` — never in source
-code, never committed. Required only for `naukri-agent inspect` and
-future browser automation (Phase 7+).
-
-### Phase 7 Stage 1 — read-only inspection
-
-Some of `browser/selectors.py` has been confirmed against real
-Naukri captures (see the file's own docstring for exactly which
-constants are `VERIFIED` vs. still `UNVERIFIED` placeholders) — this
-codebase's live access to naukri.com is limited to whatever runs
-you do locally, so treat anything not marked `VERIFIED` as a guess.
-Before trusting any browser-based Naukri interaction, run the
-inspection tool yourself, locally, where you have real network access
-and can solve a CAPTCHA/MFA challenge if one appears:
-
-```bash
-playwright install chromium   # one-time, downloads real browser binaries
-naukri-agent inspect
-```
-
-This performs a read-only walkthrough (login → profile/resume →
-job search → one listing's apply workflow) and saves HTML snapshots,
-screenshots, and a JSON summary to `./inspection_output/` (gitignored).
-Nothing is modified or submitted. Compare the saved HTML against
-`browser/selectors.py` and update it with what you actually find —
-that's the only file that should ever need editing when Naukri's UI
-changes.
-
-## Candidate configuration
-
-```bash
-cp config/candidate_profile.example.yaml config/candidate_profile.yaml
-```
-
-Edit `candidate_profile.yaml` with your real job-search criteria
-(skills, preferred roles/locations, salary expectations, notice
-period, etc.). This file is gitignored. See the file itself for field
-documentation.
-
-## Resume configuration
-
-```bash
-cp config/master_resume.example.yaml config/master_resume.yaml
-```
-
-Edit `master_resume.yaml` with your real career history — used for
-matching and as a factual record, not for generating any document.
-This file is gitignored.
-
-## Resume registry (Phase 6)
-
-This system does **not** generate or edit resumes. You maintain your
-own resume files (e.g. `resumes/data_scientist.pdf`) and register
-them:
-
-```bash
-cp config/resumes.example.yaml config/resumes.yaml
-```
-
-Edit `resumes.yaml` to list your actual files and the roles each one
-covers. `naukri-agent doctor` verifies every registered file exists.
-Both `resumes.yaml` and the `resumes/` directory are gitignored.
-
-## Running locally
-
-```bash
-naukri-agent doctor        # verify environment is set up correctly
-naukri-agent run-daily     # discover -> understand -> rank -> digest (+ Excel); one-shot
-naukri-agent discover --query "Data Scientist @ Pune"   # read-only discovery only
-naukri-agent recommend --dry-run                        # full pipeline, digest to file
-naukri-agent export-excel --path ./out/history.xlsx     # regenerate the workbook from the DB
-naukri-agent mark-applied <job-id|external-id|url> --status APPLIED --note "applied on portal"
-naukri-agent mark-status <job> INTERVIEW
-naukri-agent applications --status APPLIED              # the authoritative application history
-naukri-agent report                                    # re-print the latest digest
-naukri-agent scheduler                                 # Stage B: run run-daily automatically, once a day, forever (Ctrl+C to stop)
-```
-
-`prepare` / `apply` raise `NotImplementedError` — application
-submission is out of scope; use `mark-applied` to record one yourself.
-
-## Dry-run mode
-
-`DRY_RUN=true` in `.env` (the default) means the daily pipeline
-discovers / parses / scores / ranks and writes the digest to a file,
-but never sends email. Stage A has no code path that sends real email
-or submits an application.
-
-## Human approval mode
-
-`AUTO_APPLY=false` (the default) means every prepared application
-requires your explicit approval before submission. This is not
-changed until the system has been thoroughly tested, and even then
-only under strict, explicitly-defined safety criteria.
-
-## Daily match digest (Stage A)
-
-`run-daily` runs the whole business logic once (no scheduling):
-discover jobs (read-only), understand each JD, score deterministically
-against your `CandidateProfile` + `MasterResume`, rank, cap at
-`DAILY_RECOMMENDATION_LIMIT` (default 10), render the digest to a file,
-and regenerate `job_search_history.xlsx` from the database.
-
-- **The database is the source of truth.** Excel is a read-only mirror,
-  fully regenerated on every export.
-- **Application status is only ever what you recorded** via
-  `mark-applied` / `mark-status` — never inferred, never asked of the
-  LLM. The Naukri link in the digest always comes from the stored `Job`.
-- A job you have applied to (or any status in
-  `RECOMMENDATION_EXCLUDE_IF_STATUS`) is never recommended again. A job
-  previously recommended but not applied follows
-  `RECOMMENDATION_COOLDOWN_DAYS`: `0` = eligible again next run; `>0` =
-  wait that many days.
-- The LLM only interprets job descriptions (extract-only) and, if
-  `EXPLANATION_USE_LLM=true`, adds an optional narrative sentence. It
-  never sets a score, decision, status, or URL.
-
-## Scheduler
-
-Two equally valid ways to run the daily digest automatically — pick
-one, don't run both against the same database:
-
-1. **`naukri-agent scheduler` (Stage B, in-process)** — a single
-   foreground command (`scheduler/daemon.py`, built on APScheduler)
-   that blocks forever and fires `run_daily_recommendations` once a
-   day at `DAILY_RUN_TIME` (default `10:00`, 24-hour) in your
-   configured `TIMEZONE`. One bad day's run is logged and swallowed —
-   it never cancels tomorrow's firing. Stop it with Ctrl+C. This is
-   the simplest cross-platform option and needs nothing beyond keeping
-   one process alive (a terminal, `screen`/`tmux`, a system service
-   unit, etc.).
-2. **An OS-level scheduler** (Windows Task Scheduler / cron) invoking
-   `naukri-agent run-daily` directly on its own schedule — no
-   long-lived `naukri-agent` process at all between runs. This was the
-   original approach (validated in Run 23) and remains fully
-   supported; see the Windows walkthrough below if you'd rather not
-   keep a process running continuously.
-
-Both paths call the exact same `run_daily_recommendations` business
-logic in `orchestration/pipeline.py` — neither is "more correct" than
-the other.
-
-### Windows Task Scheduler setup (daily 10:00 AM IST)
-
-Two hard requirements, both because `naukri-agent`'s config/paths
-(`.env`, `./data`, `./logs`, `./out`, `./config`) are resolved relative
-to the process's **working directory**, not its own file location:
-
-1. **"Start in" must be the project root** — exactly the folder
-   containing `.env`, `pyproject.toml`, `data/`, `config/`. If this is
-   wrong, `.env` silently isn't found and every setting (Naukri
-   credentials included) falls back to an empty/default value.
-2. **The action must run `.venv\Scripts\naukri-agent.exe run-daily`**
-   (the installed console-script entry point) — not a bare `python`
-   invocation of some other module — because that entry point is the
-   only one that calls `setup_logging()` before anything else runs
-   (see `cli/main.py:main`), which is what makes a scheduled run's
-   logs land in `logs/naukri_agent.log` instead of nowhere.
-
-**Create the task** (PowerShell, run once, interactively, to register
-it — this does not execute the task, just creates it):
-
-```powershell
-$action = New-ScheduledTaskAction `
-  -Execute "C:\Users\sneha\Desktop\hemant\claude\projects\naukri_agent_project\naukri_agent\.venv\Scripts\naukri-agent.exe" `
-  -Argument "run-daily" `
-  -WorkingDirectory "C:\Users\sneha\Desktop\hemant\claude\projects\naukri_agent_project\naukri_agent"
-$trigger = New-ScheduledTaskTrigger -Daily -At 10:00AM
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd
-Register-ScheduledTask -TaskName "NaukriAgentDailyDigest" -Action $action -Trigger $trigger -Settings $settings -Description "naukri-agent run-daily, read-only discovery + digest, no Apply"
-```
-
-`-Daily -At 10:00AM` uses the machine's local timezone — set Windows'
-own timezone to India Standard Time (Settings, or already the case if
-you're in India) rather than trying to convert in the task itself;
-Task Scheduler has no separate per-task timezone concept.
-
-**Ollama must already be running at 10:00 AM.** On this machine Ollama
-runs as a normal per-user app (`ollama app.exe`, auto-started at
-login), **not** a Windows service — it is only alive while you are
-logged in. Two ways to make this reliable, in order of preference:
-- Leave the task at its default trigger settings (equivalent to "only
-  run when a user is logged on") and stay logged in / don't fully shut
-  down the machine overnight — the simplest option, and what was just
-  validated in Run 23.
-- If you need it to run even when logged out, you'd need Ollama
-  installed/configured as an actual Windows service first (not covered
-  here — out of scope for this change, since it touches a piece of
-  software outside this repo).
-
-Do **not** check "Run whether user is logged on or not" unless Ollama
-is guaranteed to be running independently of your session — otherwise
-JD extraction will fail with a connection error to `localhost:11434`
-every time.
-
-**What happens if Naukri needs a human** (CAPTCHA/MFA, or the
-persistent session simply expired): `login()` raises
-`NaukriCaptchaError`/`NaukriMfaError` immediately — it never blocks on
-input, so a scheduled run can never hang waiting for someone to solve
-a challenge. `orchestration/pipeline.py` catches any such exception
-around discovery and marks the `DailyRun` `FAILED` with the exception
-type recorded, so a failed scheduled run is always visible (check
-`naukri-agent doctor`'s "Digest tables reachable" count, `logs/
-naukri_agent.log`, or query `RunEvent`) — Task Scheduler's own History
-tab will also show the process's exit code.
-
-**Verify without waiting for 10:00 AM:** right-click the task in Task
-Scheduler → Run. This executes the real command immediately, so only
-do this once you're ready for a real run (same considerations as
-running `naukri-agent run-daily` by hand).
-
-## Start applying from your phone
-
-`telegram-apply` needs a terminal on the PC. To start it from your phone instead, leave one small process
-running on the PC:
-
-```
-naukri-agent telegram-listen
-```
-
-It is off unless `TELEGRAM_REMOTE_START=true` is set in `.env`. Then, from your own Telegram chat with the bot:
-
-| Send | What happens |
+| Time | What happens |
 |---|---|
-| `/apply` | starts `telegram-apply`; a card per job arrives, and nothing is applied until you tap Yes |
-| `/status` | how many jobs are ready and how many approvals are left today |
-| `/help` | the list of commands |
+| 09:45 | **Profile refresh.** Uploads the next of your resumes so your Naukri profile counts as freshly updated. |
+| 10:00 | **Daily run.** Searches, reads about 50 fresh jobs, scores them, picks the top 10 (80 or more), emails the digest, pings Telegram. |
+| 10:05 | **Research.** Researches the company-website jobs in the digest and emails what it found. |
+| 10:30, 15:00 | **Watchdog.** Silent unless a morning step did not happen; then it alerts you on Telegram. |
+| 10:50 | **Daily check.** One Telegram message: the PC is on and phone control is listening. No message means something is wrong. |
+| 19:00 | **Reminder.** Lists the Naukri Apply jobs still waiting. Silent if none. |
+| 20:00 | **"Did you apply?"** Asks about company-website jobs that have no answer yet. Silent if none. |
+| Sunday 22:00 | **Weekly report.** An Excel file of every job given that week and its status, emailed to you. |
+| Any time | **`/apply` from your phone** starts the apply run; a card per job arrives and nothing is applied without your Yes. |
 
-How it stays safe: only your configured chat is obeyed; an `/apply` older than
-`TELEGRAM_LISTENER_MAX_COMMAND_AGE_SECONDS` (default 600) is ignored; `AUTO_APPLY=true` and `DRY_RUN=false` are set
-only for the one `telegram-apply` process it starts (the listener's own settings never change); the listener
-never imports any apply code; and while an apply run is going it does not read Telegram, because the run is
-reading your taps. The PC must be on and logged in, since the clicking happens in its browser.
+## Principles
 
-**Questions.** The app asks you only the question Naukri's form is asking right now ("Question 1", "Question 2", ...), because
-Naukri's form asks only what it cannot fill from your profile or from earlier tries, even when its data lists more. A typed answer
-gets a short Yes/No ("Send this answer to Naukri?") before it goes in; a tap-choice answer is sent when you tap. If the form closes
-while you are thinking, the app reopens it and sends your answer into the fresh form; if anything looks unexpected it types nothing
-and hands the job back to you (anything already sent is kept by Naukri, so applying by hand asks only what is left). Each
-attempt saves `inspection_output/auto_apply/<attempt>_form.json`: what Naukri listed versus what its form asked.
-`APPLY_FOLLOW_LIVE_FORM=false` goes back to the old way (ask everything first, then type everything).
+| Principle | How it is enforced |
+|---|---|
+| A human approves every application | Each job is sent to Telegram with Yes and No. Silence, No or a timeout means no. `/apply` only starts the run that asks. |
+| The AI never decides | The scorer is pure arithmetic. The model only extracts fields from a posting or reads a company site. |
+| The daily run cannot apply | Tests fail if the daily pipeline, discovery, scheduler, research agent or phone listener import any apply code. |
+| No bypassing protections | CAPTCHA, MFA and rate limits are detected and handed to a human. No stealth, no evasion. |
+| The database is the truth | Only the application history says what you applied to. Excel files are copies rebuilt from it. |
+| Secrets stay local | Keys and passwords live in `.env`, which is git-ignored. Errors report only the exception type. |
 
-### Keeping phone control alive while you are away (the phone guard)
+## Quick start
 
-Windows ends the listener's task whenever the PC sleeps or the network blips. Two things keep it alive, and let you know when
-the PC itself is in trouble:
+You need **Python 3.12+**, a Naukri account, and [Ollama](https://ollama.com) running locally (or a Groq or OpenAI key).
+Windows is the primary platform: the scheduling and keep-awake features use Windows Task Scheduler.
 
-* The listener holds the PC awake from 06:00 to 23:00 (`TELEGRAM_LISTENER_AWAKE_FROM` / `_UNTIL`).
-* A second task, **Naukri Agent - Phone Guard**, runs `naukri-agent phone-guard` every 10 minutes from 06:00 to 23:00 (hidden;
-  it uses `pythonw.exe`). It starts the listener again if it is not running, and once a day at `ALIVE_MESSAGE_TIME` (10:50) it
-  sends one Telegram message: the PC is on, phone control is running, what the job search did, how many jobs wait for `/apply`.
-  **If that message does not arrive, the PC or its internet is down; ask someone at home to look.** A frozen or shut-down PC
-  cannot alert you, so silence is the signal.
-
-Register it once (PowerShell, no administrator rights):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\register_phone_guard.ps1
+```bash
+git clone https://github.com/hemantmane2113/Agentic-Job-Search-Application-Automation-System.git
+cd Agentic-Job-Search-Application-Automation-System
+python -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"
+playwright install chromium
+cp .env.example .env              # then fill in your Naukri login and the other settings
+naukri-agent doctor               # checks your setup and says exactly what is missing
+naukri-agent run-daily            # one daily run: discover, read, score, write the digest
 ```
 
-The same script switches off "run only if a network is available" on the Phone Control task. Try it without effect with
-`naukri-agent phone-guard --dry-run`. Leave the PC switched on (it may sleep after 23:00; the morning tasks wake it) and set
-Windows to sign in automatically after a restart if you will be away for long: a restart that stops at the sign-in screen stops
-everything. A PC that is shut down cannot run any task.
+`DRY_RUN=true` and `AUTO_APPLY=false` are the defaults, so a first run reads and scores jobs and writes the digest to a file. It
+applies to nothing and sends no email. The full walkthrough, with your profile, resumes, Telegram bot and email, is in
+[docs/SETUP.md](docs/SETUP.md).
 
-## "Did you apply?" for company-website jobs
+## Documentation
 
-The app cannot see what you do on a company's own site, so those jobs used to stay unrecorded unless you ran
-`mark-applied`. The phone listener (above) now asks on Telegram, one job at a time, with three buttons:
+| Guide | What is in it |
+|---|---|
+| [docs/SETUP.md](docs/SETUP.md) | Installing, configuring your profile and resumes, Telegram, email and the AI models |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Scheduled tasks, phone control, the weekly report, commands, pause switches and backups |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | `doctor`, where the logs and failure evidence are, and the problems seen so far |
+| [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) | The design, the architecture, how applying works and where to look when something breaks |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to set up for development, the rules the code follows and how to submit a change |
+| [CHANGELOG.md](CHANGELOG.md) | What changed and when |
+| [SECURITY.md](SECURITY.md) | How to report a problem safely |
 
-| Button | What is recorded | Label in the history |
-|---|---|---|
-| **Applied** | applied, with the resume that was suggested | `applied through company website` |
-| **Not applying** | a decision; the job is never suggested again | `not applied` |
-| **Later** | nothing yet; asked again next time. The 4th Later in a row for the same job records it as ignored and it is never suggested again | `ignored` |
+## Everyday commands
 
-Jobs the app itself applied to after your Yes on Telegram are labelled `applied directly`.
+| Command | What it does |
+|---|---|
+| `naukri-agent doctor` | Check that the environment, profile, resumes and database are set up |
+| `naukri-agent run-daily` | The daily run: discover, read, score, digest, Excel |
+| `naukri-agent telegram-apply` | Offer ready Naukri Apply jobs to you on Telegram (needs `AUTO_APPLY=true`, `DRY_RUN=false`) |
+| `naukri-agent telegram-listen` | Stay running so `/apply` from your phone starts the above |
+| `naukri-agent research-jobs` | Research the company-website jobs in today's digest |
+| `naukri-agent applications` | List the recorded applications |
+| `naukri-agent mark-applied <job>` | Record an application you made yourself |
+| `naukri-agent weekly-report` | Build and email the weekly Excel report |
 
-It asks when you send `/applied`, and once a day at `FOLLOWUP_REMINDER_TIME` (default 20:00, your `TIMEZONE`) when some
-job is still waiting; with nothing waiting it stays silent. It asks only about company-website jobs from digests in the
-last `FOLLOWUP_LOOKBACK_DAYS` (7) that have no record yet, at most `FOLLOWUP_MAX_JOBS` (12) at a time, and
-`FOLLOWUP_IGNORE_AFTER_LATER` (4) sets how many Laters in a row end it. No tap within
-`FOLLOWUP_ANSWER_TIMEOUT_MINUTES` (15) stops the questions and changes nothing. Turn the evening reminder off with
-`FOLLOWUP_REMINDER_ENABLED=false`. The label is in the `Applications` sheet of the Excel file and in
-`naukri-agent applications`.
+All 26 commands are listed in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
-**Part 3 of the digest** lists these company-website jobs from the last `FOLLOWUP_LOOKBACK_DAYS` days (not today's Part 1) and where each one stands: waiting for your answer (shown first, with its direct link), applied through company website, not applied, or ignored.
+## Project layout
 
-## Weekly Excel report
+```
+src/naukri_agent/
+  config.py            all settings, validated; the only place that reads the environment
+  candidate/ resume/   your profile and resumes; selection among YOUR resume files
+  jobs/                job models and the AI job parser (extraction only)
+  matching/            the deterministic scorer
+  llm/                 provider abstraction: Ollama (local), Groq, OpenAI
+  browser/             Playwright: login, search, job pages, profile upload, the apply panel
+  database/            SQLAlchemy models and repositories (SQLite)
+  orchestration/       the daily run, apply runner, phone listener, follow-up, watchdog
+  recommendations/     the digest builder and the apply-ready query
+  research_agent/      the read-only company-site researcher
+  notifications/       email (file, console, SMTP), Telegram
+  reporting/           the Excel mirror and the weekly report
+  cli/                 the `naukri-agent` command
+tests/                 about 1,800 tests; no real browser or network needed
+docs/  workflow-diagrams/   guides and the interactive diagrams
+```
 
-Every Sunday at 22:00 the scheduled task "Naukri Agent - Weekly Report" runs `naukri-agent weekly-report`. It builds one
-Excel file with every job the app gave you during that Monday-to-Sunday week and where each one stands, saves it under
-`WEEKLY_REPORT_DIR` (default `out/weekly/`), and emails it to `NOTIFY_EMAIL_TO` as an attachment (turn the email off with
-`WEEKLY_REPORT_EMAIL=false`).
+## Tech stack
 
-- **Jobs given:** company-website jobs that were in a digest's Part 1, and Naukri Apply jobs that `telegram-apply` offered or
-  a Telegram ping listed. The ping's job list is recorded from 2026-10-09; earlier pings only count the jobs actually offered.
-- **Sheets:** `Summary` (totals by route and by status) and `Jobs` (one row per job: date given, route, title, company,
-  location, match score, suggested resume, status and its date, direct apply link, Naukri link, notes), coloured by status.
-- **Status** is what the records say as of the moment the report is made. A job marked failed or unconfirmed is flagged:
-  check it on Naukri, because the app could not confirm the result and it may still have gone through.
-- Run it by hand any time: `naukri-agent weekly-report` (on a Sunday: this week; any other day: the week that just ended),
-  `--week-of 2026-10-07` for a chosen week, `--no-email` to only save the file. If the PC is off on Sunday night the task
-  runs when it is next on.
-
-## Email setup
-
-Digest delivery has three modes, selected by `EMAIL_SENDER`:
-
-- **`file`** (default) — writes the digest under `EMAIL_OUTPUT_DIR`
-  (`./out/emails/digest_<timestamp>.txt`). Nothing is sent anywhere.
-  This is what every run so far, including Run 23, has used.
-- **`console`** — prints the digest to stdout.
-- **`smtp`** — sends a real email via `SmtpEmailSender`
-  (`notifications/email.py`), stdlib `smtplib` + STARTTLS. Requires
-  `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `NOTIFY_EMAIL_TO`
-  to ALL be set in `.env` — if any are missing, the run fails clearly
-  (`EmailConfigError`, itself a subclass of the existing
-  `EmailSendError`) instead of silently falling back to a file, so a
-  broken schedule shows up as a failed run, not a quiet no-op.
-
-**For Gmail specifically:** `SMTP_HOST=smtp.gmail.com`,
-`SMTP_PORT=587`, `SMTP_USERNAME=<your gmail address>`, and
-`SMTP_PASSWORD=<a Gmail App Password>` — not your normal account
-password. Generate one at
-[myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-(requires 2-Step Verification enabled first). Any other standard
-STARTTLS SMTP provider works the same way; nothing here is
-Gmail-specific beyond that example.
-
-Credentials are read only from `.env` (via `Settings`) — never
-hard-coded, never logged. Every `SmtpEmailSender` failure is reported
-by exception type only (`type(exc).__name__`), matching
-`FileEmailSender`'s existing convention, since some SMTP server error
-responses can echo back parts of the failed request.
-
-**`EMAIL_SENDER` is still `file` by default** — switching to `smtp` is
-a deliberate, separate step you take when ready; it was not flipped as
-part of adding this capability.
+Python 3.12+, Click, SQLAlchemy and SQLite, Playwright (Chromium), Pydantic, Ollama (local parsing), Groq (company research),
+OpenAI (optional), OpenPyXL (Excel), APScheduler (optional), the Telegram Bot API, and Windows Task Scheduler.
 
 ## Testing
 
@@ -472,57 +145,28 @@ part of adding this capability.
 pytest
 ```
 
-Three tiers, separated so the default run never needs real network or
-credentials:
-- **Unit tests** — pure logic (matching, models, config).
-- **Mocked browser tests** (`test_browser_*.py`) — validate Naukri
-  orchestration logic against fake Page objects.
-- **Manual/real-integration tests** (`tests/manual/`) — require a
-  real Naukri account and installed browser binaries; marked
-  `@pytest.mark.manual` and excluded by default. Run with
-  `pytest -m manual` — see `tests/manual/README.md`.
+The default run uses fake browser pages and needs no network or credentials: currently **1,773 passed, 3 deselected**. Tests
+that need a real Naukri account are marked `manual` and are excluded unless you run `pytest -m manual`.
 
-Stage A added tests for recommendation ranking + cooldown semantics,
-application history, digest/Excel output, read-only job-detail fetch,
-end-to-end pipeline, and new-table migration; Stage B added tests for
-the scheduler's job configuration and its safe-failure wrapper. Full
-non-manual suite: 855 passed, 3 deselected.
+## Status and limits
 
-## Troubleshooting
+Stated plainly, so nobody is surprised:
 
-Run `naukri-agent doctor` first — it checks Python version, config
-loading, LLM provider configuration, database connectivity, that your
-candidate profile and master resume YAML files exist and parse
-correctly, and that every resume registered in `resumes.yaml`
-actually exists on disk — reporting exactly which check failed.
+- **Built for one person on one Windows PC.** It is a personal tool, not a hosted service, and it works with Naukri only.
+- **The apply form is the fragile part.** Naukri's question panel varies. The code handles each kind seen so far and stops
+  cleanly with a saved screenshot when it meets a new one. The newest "answer what the form asks" flow has been tested only
+  against scripted copies of the real page, so treat it as unproven until it has run on a real application.
+- **It depends on Naukri's pages.** A site change can break a selector. All of them live in one file, marked VERIFIED
+  (with a date) or UNVERIFIED.
+- **A shut-down PC cannot run anything.** The guard and the daily check exist so you notice.
 
-## Safety considerations
+## Responsible use
 
-- Never bypasses CAPTCHA, MFA, or anti-bot mechanisms — pauses and
-  asks for human intervention instead (Section 20).
-- Never submits an application without explicit human approval unless
-  `AUTO_APPLY` is deliberately enabled after thorough testing.
-- Never fabricates salary, experience, employment history, notice
-  period, qualifications, legal declarations, or demographic
-  information.
-- Credentials and API keys live only in `.env` / environment
-  variables, never in source or committed config.
+This project automates your own Naukri account for your own job search. Automated access may be restricted by Naukri's terms
+of service, and you are responsible for using it in line with them. It deliberately avoids anything that would evade a site's
+protections: it never solves a CAPTCHA, never works around MFA or rate limits, and never presses "Apply on company site"
+(Naukri marks the job as applied when that button is pressed). It is not affiliated with or endorsed by Naukri.com or Info Edge.
 
-## Development phases
+## Contributing and license
 
-| Phase | Contents | Status |
-|---|---|---|
-| 1 | Scaffolding, config, database, logging, CLI skeleton | ✅ done |
-| 2 | Candidate profile + master resume models | ✅ done |
-| 3 | Job model + storage + deduplication | ✅ done |
-| 4 | Deterministic job matching engine | ✅ done |
-| 5 | LLM-based job description parser + provider abstraction | ✅ done |
-| 6 | Resume registry + selection (revised from resume-tailoring) | ✅ done |
-| 7 | Playwright Naukri integration | 🟡 Stage 1 (read-only inspection) done; read-only job-detail fetch added for Stage A; Stage 1.5 Apply-workflow frozen |
-| 8 | Application preparation | ⛔ abandoned — application submission is out of scope |
-| 9 | Human approval interface | ⛔ abandoned |
-| A | Daily match digest (objective change) | ✅ done — discovery + JD fetch, deterministic ranking, ApplicationHistory + manual `mark-applied`, file/console digest, 3-sheet Excel, `RunEvent` audit |
-| B | Real SMTP email + scheduler | ✅ done — `SmtpEmailSender` (opt-in via `EMAIL_SENDER=smtp`) and `naukri-agent scheduler` (in-process daily trigger); OS-level cron/Task Scheduler remains a supported alternative to the latter |
-| 12 | Testing, logging, error handling, docs polish | ✅ done — coverage audit (90% project-wide) closed the two real gaps it found: `setup_logging()` had zero dedicated tests (`tests/test_logging_config.py`, new), and a bad `.env` value showed a raw traceback instead of a clean error (`main()` now catches it, `tests/test_cli_startup.py`); `docs/PROJECT_OVERVIEW.md` rewritten for the current Stage A/B architecture instead of describing the pre-objective-change design |
-| 13 | Fine-tuning: scoring/matching accuracy, LLM reliability, digest format | ⛔ planned, not started. Scoring accuracy: revisit category weights and the location-mismatch penalty against real digest results; also an **open design question, not a decided change** — whether a broad skill on the resume (e.g. "Machine Learning") should earn partial credit against a specific technique a job requires (e.g. "XGBoost"). The project's current rule (`matching/skill_normalizer.py`) treats this as forbidden capability inference, and the one time broader semantic matching was tried (`semantic_skill_matcher.py`'s Tier 3) real-Ollama testing found it confidently wrong on this exact "umbrella vs. specific" shape — so this needs a deliberate, curated, partial-credit design, not just enabling Tier 3. LLM reliability: reduce "N job(s) could not be parsed by the LLM" failures (Ollama connectivity/prompt robustness/provider choice). Digest format: improve explanations/sort/grouping/detail level based on real usage. |
-| 14 | End-to-end automation: an apply-on-your-behalf agent, human-approved | ⛔ planned, not started. **This reverses the 2026-09-09 objective change**, which explicitly abandoned automatic application submission — `prepare_application()` raising `NotImplementedError` and Stage 1.5's apply-workflow reconnaissance being frozen were direct consequences of that decision. Requested scope: build an agent that prepares and submits applications with a human approving each one (the original Stage 2 design, before it was abandoned) — not the fully unattended, no-approval automation the phrase might otherwise suggest. `browser/apply_inspection.py` (Stage 1.5, frozen) already characterizes part of Naukri's real apply workflow and its safety machinery (CAPTCHA/MFA pause, default-deny network guard, resume-control classification) and would be the starting point, not a from-scratch build. Needs its own explicit design/approval conversation before any code is written — see `CLAUDE.md`'s working style section. |
+Issues and pull requests are welcome; start with [CONTRIBUTING.md](CONTRIBUTING.md). Released under the [MIT License](LICENSE).
