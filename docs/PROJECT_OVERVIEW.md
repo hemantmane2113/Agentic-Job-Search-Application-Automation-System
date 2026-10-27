@@ -171,7 +171,7 @@ free tier. Careers pages that show no text to an automated reader are flagged, a
 
 Three tiers, kept separate: unit tests (pure logic), mocked-browser tests (`tests/browser_fakes.py`, no real browser or network),
 and manual tests in `tests/manual/` that need a real Naukri account (`pytest -m manual`, excluded by default). Currently
-**1771 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
+**1773 passed, 3 deselected**. Run `pytest` before considering any change done. Apply-flow behaviour that only Naukri's real page can
 confirm is called out as UNVERIFIED in `selectors.py` until a real run proves it.
 
 ---

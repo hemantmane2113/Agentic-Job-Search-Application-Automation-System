@@ -147,6 +147,9 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = "sqlite:///./data/naukri_agent.db"
+    # SQLite allows one writer at a time. A write that meets another process's write waits this long before failing
+    # (27 Oct: a /applied tap during the daily run failed at once with "database is locked"; Python's default wait is 5 s).
+    database_busy_wait_seconds: float = 30
 
     # --- Logging ---
     log_dir: Path = Path("./logs")

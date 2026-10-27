@@ -38,6 +38,7 @@ def make_engine(settings: Settings):
         if db_path and db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         connect_args["check_same_thread"] = False
+        connect_args["timeout"] = settings.database_busy_wait_seconds
 
     return create_engine(settings.database_url, connect_args=connect_args)
 
