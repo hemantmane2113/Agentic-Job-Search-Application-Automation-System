@@ -60,7 +60,8 @@ scripts/                         register_phone_guard.ps1 (the 10-minute guard t
   agents/  scheduler/  legacy/   profile answers (no AI); optional in-process scheduler; older commands kept but unused
   cli/                           `naukri-agent <command>`
 tests/                           94+ files; tests/manual/ needs a real Naukri account; tests/browser_fakes.py fakes Playwright
-docs/                            PROJECT_OVERVIEW.md and the architecture/workflow HTML pages
+docs/                            PROJECT_OVERVIEW.md and architecture.html (the system map)
+workflow-diagrams/               the daily-run, apply-flow and weekly-report pages (one HTML file each) and a README
 ```
 
 ## What runs when (Windows Task Scheduler, user signed in)
