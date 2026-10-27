@@ -7,6 +7,18 @@ ranked daily digest of the strongest matches with their Naukri links
 and concise reasons. It never submits an application, and never
 attempts to bypass CAPTCHA, MFA, or anti-bot protections (Section 20).
 
+## See how it works
+
+Interactive diagrams of the whole app. GitHub shows an `.html` file as code, so open them with these links (they run as normal web pages):
+
+| | |
+|---|---|
+| [![System map](workflow-diagrams/previews/architecture.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/docs/architecture.html)<br>**[System map](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/docs/architecture.html)**<br>The parts, a day hour by hour, safety rails, what is stored | [![The daily run](workflow-diagrams/previews/daily-run.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-daily-run.html)<br>**[The daily run](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-daily-run.html)**<br>Finding, reading, scoring and telling you |
+| [![How an application happens](workflow-diagrams/previews/apply-flow.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-apply-flow.html)<br>**[How an application happens](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-apply-flow.html)**<br>Your Yes tap, the right resume, the form's questions | [![Keeping your phone reachable](workflow-diagrams/previews/phone-reachability.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-phone-reachability.html)<br>**[Keeping your phone reachable](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-phone-reachability.html)**<br>Listener, guard, Daily check, reminders |
+| [![The Sunday weekly report](workflow-diagrams/previews/weekly-report.png)](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-weekly-report.html)<br>**[The Sunday weekly report](https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/workflow-diagrams/workflow-weekly-report.html)**<br>The weekly Excel report |  |
+
+All five in one place: **https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/**
+
 > **Objective change (2026-09-09):** automatic application submission
 > was dropped. The goal is now a **daily match digest** — discover,
 > understand, rank, and email the best jobs; you apply on Naukri

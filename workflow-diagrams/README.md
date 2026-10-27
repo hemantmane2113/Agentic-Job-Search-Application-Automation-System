@@ -1,7 +1,10 @@
 # Workflow diagrams
 
-Four interactive pages that show how the app works. Each is one self-contained HTML file: download it (or clone the
-repository) and open it in a browser. No server and no internet connection are needed.
+Four interactive pages that show how the app works. Each is one self-contained HTML file.
+
+**To see them properly, use the live site: https://hemantmane2113.github.io/Agentic-Job-Search-Application-Automation-System/**
+(GitHub shows an `.html` file as code.) Or clone the repository and double-click a file: no server and no internet
+connection are needed. Small preview pictures are in `previews/`.
 
 | Page | What it shows |
 |---|---|
