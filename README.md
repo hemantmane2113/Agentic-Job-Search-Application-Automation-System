@@ -95,6 +95,7 @@ applies to nothing and sends no email. The full walkthrough, with your profile, 
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | `doctor`, where the logs and failure evidence are, and the problems seen so far |
 | [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) | The design, the architecture, how applying works and where to look when something breaks |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to set up for development, the rules the code follows and how to submit a change |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How we expect people to treat each other here |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and when |
 | [SECURITY.md](SECURITY.md) | How to report a problem safely |
 

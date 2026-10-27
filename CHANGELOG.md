@@ -13,7 +13,7 @@ has no tagged releases yet, so entries are grouped by date, newest first.
 - Live-form applying: the app asks only the question Naukri's form is asking right now, one at a time, and sends each answer at
   Naukri's pace. It saves `_form.json` evidence showing what Naukri listed versus what its form asked.
 - Interactive diagrams and a diagrams section on the README.
-- The MIT License.
+- The MIT License and a Code of Conduct (Contributor Covenant 2.1).
 - Setup, operations and troubleshooting guides, this changelog, contributing and security notes, issue and pull-request
   templates, and a test workflow.
 
