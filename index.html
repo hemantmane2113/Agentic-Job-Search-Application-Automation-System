@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Naukri Agent Diagrams</title>
+<style>
+  :root { --bg:#f6f4ee; --ink:#1c1b19; --muted:#6b665a; --card:#fbf9f3; --line:#cfc8b6; --accent:#b4402a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161513; --ink:#ece8dc; --muted:#a39d8c; --card:#1e1d1a; --line:#3a3730; --accent:#e0725a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 Georgia, "Times New Roman", serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1rem 4rem; }
+  .eyebrow { font:12px ui-monospace, Consolas, monospace; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); }
+  h1 { font-size:2rem; line-height:1.2; margin:.5rem 0 1rem; }
+  p { color:var(--muted); }
+  ul { list-style:none; padding:0; margin:2rem 0 0; display:grid; gap:1rem; }
+  a.card { display:block; padding:1rem 1.2rem; background:var(--card); border:1px solid var(--line); color:inherit; text-decoration:none; }
+  a.card:hover, a.card:focus-visible { border-color:var(--accent); outline:none; }
+  a.card strong { display:block; font-size:1.1rem; }
+  a.card span { color:var(--muted); font-size:.95rem; }
+  footer { margin-top:2.5rem; font-size:.9rem; color:var(--muted); }
+  footer a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">naukri-agent</div>
+  <h1>How the job-search assistant works</h1>
+  <p>Interactive diagrams of a personal Naukri job-search assistant: plain code decides, an AI model only reads, and a person approves every application.</p>
+  <ul>
+    <li><a class="card" href="docs/architecture.html"><strong>System map</strong><span>The parts, a day hour by hour, how an application happens, safety rails and what is stored.</span></a></li>
+    <li><a class="card" href="workflow-diagrams/workflow-daily-run.html"><strong>The daily run</strong><span>Profile refresh, finding and reading jobs, scoring, the digest email and the Telegram ping.</span></a></li>
+    <li><a class="card" href="workflow-diagrams/workflow-apply-flow.html"><strong>How an application happens</strong><span>The Yes tap, the right resume, the questions Naukri's form asks, and the confirmation.</span></a></li>
+    <li><a class="card" href="workflow-diagrams/workflow-weekly-report.html"><strong>The Sunday weekly report</strong><span>How the weekly Excel report is built and emailed.</span></a></li>
+  </ul>
+  <footer>Source and code: <a href="https://github.com/hemantmane2113/Agentic-Job-Search-Application-Automation-System">GitHub repository</a></footer>
+</main>
+</body>
+</html>
